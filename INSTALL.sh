@@ -141,7 +141,26 @@ EOF
 
 systemctl daemon-reload
 systemctl enable --now vpnshop
-echo ">> service is up on port ${PORT}."
+
+# ---------- verify the backend actually serves (avoid silent 502) ----------
+echo ">> waiting for the shop to answer on port ${PORT}..."
+SHOP_UP=""
+for i in $(seq 1 20); do
+  curl -sf "http://127.0.0.1:${PORT}/" >/dev/null 2>&1 && { SHOP_UP=1; break; }
+  sleep 1
+done
+if [ -z "$SHOP_UP" ]; then
+  echo "!! Backend did not come up — nginx would only serve 502. Recent service log:"
+  journalctl -u vpnshop -n 25 --no-pager || true
+  echo ""
+  echo "   Common causes:"
+  echo "   - 'No such built-in module: node:sqlite' -> Node too old (need 22.5+). Fix:"
+  echo "       curl -fsSL https://deb.nodesource.com/setup_24.x | bash - && apt-get install -y nodejs && systemctl restart vpnshop"
+  echo "   - 'port ${PORT} is already in use'       -> pick another port and reinstall"
+  echo "   - permission errors on data/vpnshop.db   -> chown -R www-data:www-data ${APP_DIR}/data"
+  exit 1
+fi
+echo ">> backend verified: answering HTTP on port ${PORT}."
 
 # ---------- nginx + ssl ----------
 if [ -n "${DOMAIN}" ]; then
