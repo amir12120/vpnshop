@@ -67,8 +67,8 @@ jobs:
           if [ "${ok:-}" != "1" ]; then sudo journalctl -u vpnshop -n 50 --no-pager; exit 1; fi
           curl -sf http://127.0.0.1:3000/login | grep -q "ورود"
           code=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3000/admin)
-          echo "GET /admin -> $code (200 expected: login page HTML)"
-          [ "$code" = "200" ]
+          echo "GET /admin (anonymous) -> $code (403 expected: non-admins rejected)"
+          [ "$code" = "403" ]
 
       - name: Verify admin login works (session issued)
         run: |
