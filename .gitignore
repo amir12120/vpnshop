@@ -1,0 +1,12 @@
+# runtime artifacts — never commit these
+node_modules/
+data/
+public/uploads/*
+!public/uploads/.gitkeep
+*.log
+*.log.err
+.freebuff/
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
