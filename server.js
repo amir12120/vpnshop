@@ -186,6 +186,7 @@ route('POST', '/login', async (req, res) => {
   const b = new URLSearchParams((await readBody(req)).toString());
   const u = db.prepare('SELECT * FROM users WHERE username = ?').get((b.get('username') || '').trim());
   if (!u || !verifyPassword(b.get('password') || '', u.password_hash)) {
+    await new Promise((r) => setTimeout(r, 800)); // slow down brute force
     return redirect(res, '/login?err=' + encodeURIComponent('نام کاربری یا رمز عبور اشتباه است'));
   }
   send(res, 302, '', { Location: '/', 'Set-Cookie': `session=${makeSession(u.id)}; HttpOnly; Path=/; SameSite=Lax; Max-Age=604800` });
@@ -646,9 +647,11 @@ route('GET', '/uploads/:name', async (req, res, ctx) => {
   if (!fs.existsSync(file)) return send(res, 404, 'not found');
   const ext = path.extname(name).toLowerCase();
   if (!MIME[ext]) return send(res, 403, 'forbidden');
-  // receipts are private: only owner or admin may view
+  // receipts are private: only owner or admin may view; files with no
+  // matching order (orphans) are never served publicly
   const order = db.prepare('SELECT o.*, u.id AS uid FROM orders o JOIN users u ON u.id = o.user_id WHERE o.receipt_path = ?').get('/uploads/' + name);
-  if (order && (!ctx.user || (ctx.user.role !== 'admin' && ctx.user.id !== order.uid))) {
+  if (!order) return send(res, 404, 'not found');
+  if (ctx.user?.role !== 'admin' && ctx.user?.id !== order.uid) {
     return send(res, 403, 'forbidden');
   }
   send(res, 200, fs.readFileSync(file), { 'Content-Type': MIME[ext], 'Cache-Control': 'private, max-age=3600' });
@@ -666,7 +669,7 @@ const server = http.createServer(async (req, res) => {
   try {
     const u = new URL(req.url, 'http://localhost');
     const qs = Object.fromEntries(u.searchParams);
-    const ctx = { user: getUser(req), params: {}, query: qs };
+    const ctx = { user: getUser(req), params: {}, query: qs, req, res };
 
     for (const r of routes) {
       if (r.method !== req.method) continue;
