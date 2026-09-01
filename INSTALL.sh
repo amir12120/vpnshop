@@ -107,7 +107,13 @@ chown -R www-data:www-data "$APP_DIR"
 
 # management CLI
 install -m 0755 vpnshop-cli.sh /usr/local/bin/vpnshop
-echo ">> management CLI installed: vpnshop (run 'vpnshop help')"
+sed -i 's/\r$//' /usr/local/bin/vpnshop   # strip CRLF if any survived (Windows checkouts)
+chmod +x /usr/local/bin/vpnshop
+if vpnshop --version >/dev/null 2>&1; then
+  echo ">> management CLI installed: $(vpnshop --version) — type 'vpnshop' for the menu"
+else
+  echo "!! CLI installed but not runnable — check:  head -1 /usr/local/bin/vpnshop | cat -A"
+fi
 
 # the app dir is owned by www-data but git commands (vpnshop update) run as
 # root — mark it safe so git never refuses with "dubious ownership"

@@ -256,6 +256,17 @@ cmd_ssl() {
 
 # ---------------------------------------------------------------- doctor / ports
 cmd_doctor() {
+  # CLI installation sanity
+  if command -v vpnshop >/dev/null 2>&1; then
+    ok "CLI installed: $(command -v vpnshop) ($(vpnshop --version 2>/dev/null || echo '?'))"
+    if grep -q $'\r' /usr/local/bin/vpnshop 2>/dev/null; then
+      err "CLI file has Windows CRLF line endings — fixing now"
+      sed -i 's/\r$//' /usr/local/bin/vpnshop && chmod +x /usr/local/bin/vpnshop && ok "CRLF stripped, try again"
+    fi
+  else
+    err "CLI not installed at /usr/local/bin/vpnshop — install it with:"
+    echo "      sudo install -m 0755 $APP_DIR/vpnshop-cli.sh /usr/local/bin/vpnshop"
+  fi
   cd "$APP_DIR" && node scripts/doctor.js
 }
 cmd_ports() {
