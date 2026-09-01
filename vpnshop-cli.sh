@@ -65,6 +65,9 @@ cmd_update() {
     systemctl restart "$SERVICE"
     ok "updated and restarted (${behind} new commit(s))"
   fi
+  # keep the CLI itself current (self-heal for installs made before the CLI existed)
+  install -m 0755 "$APP_DIR/vpnshop-cli.sh" /usr/local/bin/vpnshop
+  ok "CLI refreshed: $(command -v vpnshop)"
 }
 
 # ---------------------------------------------------------------- backup / restore

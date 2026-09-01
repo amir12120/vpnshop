@@ -32,6 +32,12 @@ const info = (m) => console.log(`  ➜ ${m}`);
   try { require.resolve('qrcode'); ok('qrcode module present'); }
   catch { fail('qrcode module missing — run: npm install'); }
 
+  // node version (node:sqlite needs 22.5+)
+  const major = parseInt(process.versions.node.split('.')[0], 10);
+  if (major >= 22) ok(`node ${process.versions.node} (OK)`);
+  else fail(`node ${process.versions.node} is too old — node:sqlite needs 22.5+. Install Node 24: ` +
+    'curl -fsSL https://deb.nodesource.com/setup_24.x | sudo bash - && sudo apt-get install -y nodejs');
+
   // panels (tunnel reachability)
   const panels = db.prepare('SELECT * FROM panels ORDER BY id').all();
   if (!panels.length) {
