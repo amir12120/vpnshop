@@ -163,9 +163,10 @@ EOF
   nginx -t && systemctl reload nginx
 
   if [ "${SSL_MODE}" = "1" ]; then
-    apt-get install -y certbot python3-certbot-nginx
-    certbot --nginx -d "${DOMAIN}" --non-interactive --agree-tos -m "admin@${DOMAIN#*.}" || \
-      echo "!! SSL issuance failed — check DNS (does it point to this server? is port 80 open?). Retry later with: vpnshop ssl letsencrypt ${DOMAIN}"
+    # handles port-80 conflicts itself: stops nginx temporarily if it holds 80,
+    # issues the cert standalone, restarts nginx and configures the 443 block
+    vpnshop ssl letsencrypt "${DOMAIN}" || \
+      echo "!! SSL issuance failed — check DNS (does it point to this server?). Retry later with: vpnshop ssl letsencrypt ${DOMAIN}"
   fi
 fi
 

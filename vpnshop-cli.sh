@@ -129,19 +129,78 @@ ssl_renew() {
   info "renewing..."
   certbot renew --force-renewal && systemctl reload nginx && ok "renewed and nginx reloaded"
 }
+port80_holder() {  # prints the process name holding port 80, empty if free
+  ss -tlnp "sport = :80" 2>/dev/null | grep -oP 'users:\(\("\K[^"]+' | head -1
+}
+
+write_ssl_vhost() {  # $1 = domain — rewrite vhost: 80 redirects to 443 ssl
+  local domain="$1"
+  cat >"$NGINX_SITE" <<EOF
+server {
+    listen 80;
+    server_name ${domain};
+    return 301 https://\$host\$request_uri;
+}
+server {
+    listen 443 ssl;
+    server_name ${domain};
+    ssl_certificate /etc/letsencrypt/live/${domain}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${domain}/privkey.pem;
+    client_max_body_size 12m;
+    location / {
+        proxy_pass http://127.0.0.1:$(get_port);
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+    }
+}
+EOF
+}
+
 ssl_letsencrypt() {
   need_root
   local domain="${1:-$(get_domain)}"
   [ -n "$domain" ] || { err "usage: vpnshop ssl letsencrypt <domain>"; exit 1; }
-  info "installing Let's Encrypt certificate for ${domain}..."
-  command -v certbot >/dev/null 2>&1 || apt-get install -y certbot python3-certbot-nginx
-  if certbot --nginx -d "$domain" --non-interactive --agree-tos -m "admin@${domain#*.}"; then
-    systemctl reload nginx; ok "HTTPS enabled for ${domain}"
-    systemctl enable --now certbot.timer >/dev/null 2>&1 || true
-    ok "auto-renew timer active"
+  command -v certbot >/dev/null 2>&1 || apt-get install -y certbot
+  info "checking port 80 before issuing the certificate..."
+
+  local stopped_nginx=0 holder
+  if holder=$(port80_holder) && [ -n "$holder" ]; then
+    if [ "$holder" = "nginx" ]; then
+      echo "  port 80 is held by nginx — stopping it temporarily for the challenge..."
+      systemctl stop nginx
+      stopped_nginx=1
+    else
+      echo "!! port 80 is held by '$holder' (not nginx) — the challenge needs port 80."
+      echo "   Free port 80 first, then retry:  vpnshop ssl letsencrypt $domain"
+      exit 1
+    fi
   else
-    err "failed — check DNS points to this server and port 80 is open"
+    echo "  port 80 is free."
   fi
+
+  local cert_ok=0
+  if certbot certonly --standalone -d "$domain" --non-interactive --agree-tos \
+       --keep-until-expiring -m "admin@${domain#*.}"; then
+    cert_ok=1
+  fi
+
+  # always bring nginx back up, cert or no cert
+  if [ "$stopped_nginx" = "1" ]; then
+    systemctl start nginx && ok "nginx restarted"
+  fi
+  [ "$cert_ok" = "1" ] || { err "certificate issuance failed — check DNS points to this server"; return 1; }
+
+  write_ssl_vhost "$domain"
+  nginx -t >/dev/null 2>&1 && systemctl reload nginx && ok "HTTPS enabled for ${domain} (80 -> 443)"
+
+  # standalone renewal needs port 80: stop/start nginx around each renewal
+  mkdir -p /etc/letsencrypt/renewal-hooks/pre /etc/letsencrypt/renewal-hooks/post
+  printf '#!/bin/sh\nsystemctl stop nginx\n'  > /etc/letsencrypt/renewal-hooks/pre/vpnshop-standalone
+  printf '#!/bin/sh\nsystemctl start nginx\n' > /etc/letsencrypt/renewal-hooks/post/vpnshop-standalone
+  chmod +x /etc/letsencrypt/renewal-hooks/pre/vpnshop-standalone /etc/letsencrypt/renewal-hooks/post/vpnshop-standalone
+  systemctl enable --now certbot.timer >/dev/null 2>&1 || true
+  ok "auto-renew timer active (hooks stop/start nginx around renewals)"
 }
 ssl_remove() {
   need_root
