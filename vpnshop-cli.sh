@@ -53,6 +53,9 @@ cmd_update() {
   need_root
   info "pulling latest code..."
   cd "$APP_DIR"
+  # app dir is owned by www-data; root git commands need safe.directory
+  git config --global --get-all safe.directory 2>/dev/null | grep -qx "$APP_DIR" || \
+    git config --global --add safe.directory "$APP_DIR"
   git fetch origin main
   local behind; behind=$(git rev-list HEAD..origin/main --count)
   if [ "$behind" = "0" ]; then ok "already up to date"; else

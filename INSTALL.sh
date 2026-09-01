@@ -111,6 +111,10 @@ chown -R www-data:www-data "$APP_DIR"
 install -m 0755 vpnshop-cli.sh /usr/local/bin/vpnshop
 echo ">> management CLI installed: vpnshop (run 'vpnshop help')"
 
+# the app dir is owned by www-data but git commands (vpnshop update) run as
+# root — mark it safe so git never refuses with "dubious ownership"
+git config --global --add safe.directory "$APP_DIR"
+
 # admin user
 node seed-admin.js "$ADMIN_USER" "$ADMIN_PASS"
 chown -R www-data:www-data "$APP_DIR/data"   # db must be writable by the service user
