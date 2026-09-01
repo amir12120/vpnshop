@@ -27,6 +27,8 @@
 
 ## نصب سریع (Ubuntu 22.04 — دسترسی روت)
 
+نصب‌کننده کاملاً به زبان انگلیسی است و گام‌به‌گام می‌پرسد: دامنه، پورت، نوع SSL و نام کاربری/رمز ادمین.
+
 ```bash
 bash <(curl -fsSL https://raw.githubusercontent.com/amir12120/vpnshop/main/INSTALL.sh)
 ```
@@ -71,6 +73,35 @@ cd /opt/vpnshop && bash INSTALL.sh
 ```
 
 ⚠️ **نکته لینک اشتراک:** لینک اشتراک از Base URL پنل ساخته می‌شود. اگر پنل را با آدرس تونل ثبت کرده باشید، لینک روی گوشی مشتری کار نمی‌کند — آدرسی ثبت کنید که کلاینتِ کاربر بتواند به آن وصل شود (دامنه عمومی پنل یا IP عمومی سمت ایرانِ تونل).
+
+## مدیریت با CLI (`vpnshop`)
+
+نصب‌کننده یک ابزار مدیریت به مسیر `/usr/local/bin/vpnshop` نصب می‌کند — روی سرور فقط تایپ کنید `vpnshop` (منوی تعاملی) یا از دستورات مستقیم:
+
+```bash
+vpnshop status                 # وضعیت سرویس، آدرس‌ها، مصرف دیسک
+vpnshop restart                # ری‌استارت
+vpnshop logs 100               # ۱۰۰ خط آخر لاگ
+vpnshop update                 # دریافت آخرین نسخه از گیت‌هاب + ری‌استارت
+vpnshop port 3001              # تغییر پورت (سرویس + nginx)
+vpnshop admin admin رمز_جدید   # ساخت/ریست کاربر ادمین
+vpnshop backup                 # بکاپ دیتابیس + فیش‌ها + کانفیگ‌ها
+vpnshop restore backup.tar.gz  # بازگردانی بکاپ
+vpnshop uninstall --purge      # حذف کامل (با --purge دیتا هم پاک می‌شود)
+vpnshop help                   # لیست کامل دستورات
+```
+
+### مدیر SSL
+
+```bash
+vpnshop ssl                        # منوی تعاملی SSL
+vpnshop ssl status                 # نمایش گواهی‌ها و تاریخ انقضا
+vpnshop ssl letsencrypt shop.example.ir   # نصب HTTPS + فعال‌سازی تمدید خودکار
+vpnshop ssl renew                  # تمدید اجباری گواهی‌ها
+vpnshop ssl remove                 # بازگشت به HTTP ساده
+```
+
+پس از نصب Let's Encrypt با `vpnshop ssl letsencrypt`، تایمر تمدید خودکار certbot هم فعال می‌شود.
 
 ## تست
 
