@@ -59,7 +59,7 @@ const get = (path, cookie) => fetch(SHOP + path, { redirect: 'manual', headers: 
   r = await form('/admin/settings', { card_number: 'hax' }, cust);
   check('customer blocked from admin POST (403)', r.res.status === 403);
   r = await get('/admin', undefined);
-  check('anonymous blocked from /admin', r.status === 403);
+  check('anonymous /admin redirects to login', r.status === 302 && r.headers.get('location') === '/login');
 
   // ---- admin can still work
   r = await get('/admin', admin);

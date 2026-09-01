@@ -67,10 +67,10 @@ jobs:
           if [ "${ok:-}" != "1" ]; then sudo journalctl -u vpnshop -n 50 --no-pager; exit 1; fi
           curl -sf http://127.0.0.1:3000/login | grep -q "ورود"
           code=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3000/admin)
-          echo "GET /admin (anonymous) -> $code (403 expected: non-admins rejected)"
-          [ "$code" = "403" ]
+          echo "GET /admin (anonymous) -> $code (302 expected: redirected to /login)"
+          [ "$code" = "302" ]
 
-      - name: Verify admin login works (session issued)
+      - name: Verify admin login works (session issued + panel renders)
         run: |
           code=$(curl -s -o /dev/null -w '%{http_code}' \
             -d 'username=admin&password=adminpass123' \
@@ -78,6 +78,11 @@ jobs:
             http://127.0.0.1:3000/login)
           echo "POST /login -> $code (302 expected)"
           [ "$code" = "302" ]
+          cookie=$(curl -si -d 'username=admin&password=adminpass123' \
+            -H 'Content-Type: application/x-www-form-urlencoded' \
+            http://127.0.0.1:3000/login | grep -i '^set-cookie' | cut -d' ' -f2 | cut -d';' -f1)
+          curl -s -H "Cookie: $cookie" http://127.0.0.1:3000/admin | grep -q "پنل مدیریت"
+          echo "GET /admin with session -> renders admin panel"
 
       - name: CLI smoke (status / doctor / ports)
         run: |

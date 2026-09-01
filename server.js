@@ -318,8 +318,13 @@ route('GET', '/orders', async (req, res, { user, query }) => {
 
 // ---------------------------------------------------------------- ADMIN
 function requireAdmin(ctx) {
-  if (!ctx.user || ctx.user.role !== 'admin') {
-    send(ctx.res, 403, layout('دسترسی', '<p>فقط مدیر.</p>', ctx.user));
+  if (!ctx.user) {
+    // anonymous visitor: send them to the login page instead of a dead-end 403
+    redirect(ctx.res, '/login');
+    return false;
+  }
+  if (ctx.user.role !== 'admin') {
+    send(ctx.res, 403, layout('دسترسی', '<p>فقط مدیر. اگر مدیر هستید، با حساب ادمین <a href="/login">وارد شوید</a>.</p>', ctx.user));
     return false;
   }
   return true;
