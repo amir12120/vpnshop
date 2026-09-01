@@ -93,8 +93,9 @@ echo ">> Installing dependencies..."
 apt-get update -y
 apt-get install -y curl ca-certificates gnupg nginx rsync
 
-if ! command -v node >/dev/null 2>&1 || [ "$(node -v | cut -c2- | cut -d. -f1)" -lt 18 ]; then
-  curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+if ! command -v node >/dev/null 2>&1 || [ "$(node -v | cut -c2- | cut -d. -f1)" -lt 22 ]; then
+  # node:sqlite requires Node 22.5+; we install 24 (current LTS)
+  curl -fsSL https://deb.nodesource.com/setup_24.x | bash -
   apt-get install -y nodejs
 fi
 echo ">> node $(node -v)"
