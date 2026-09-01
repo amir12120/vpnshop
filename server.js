@@ -686,6 +686,16 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
+server.on('error', (e) => {
+  if (e.code === 'EADDRINUSE') {
+    console.error(`[fatal] port ${PORT} is already in use (tunnel listener or another app?).` +
+      ' Change PORT env or free the port, then restart.');
+  } else {
+    console.error('[fatal] server error:', e);
+  }
+  process.exit(1);
+});
+
 server.listen(PORT, () => {
   console.log(`VPN shop listening on port ${PORT}`);
 });
