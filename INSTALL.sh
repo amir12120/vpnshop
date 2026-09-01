@@ -44,9 +44,36 @@ echo "=============================="
 echo " VPN Shop — Installer"
 echo "=============================="
 
+# ---------- port conflict check (tunnel-safe) ----------
+port_busy() {  # true if something is listening on $1
+  ss -tlnH "sport = :$1" 2>/dev/null | grep -q . || netstat -tln 2>/dev/null | grep -q ":$1 "
+}
+if port_busy "$PORT"; then
+  echo "!! Port ${PORT} is already in use on this server:"
+  ss -tlnp "sport = :${PORT}" 2>/dev/null || netstat -tlnp 2>/dev/null | grep ":${PORT} "
+  echo "   This server may host tunnel listeners. Choose a free port, e.g.:"
+  echo "     ss -tlnp | grep LISTEN   # see all used ports"
+  exit 1
+fi
+
 read -rp "Domain (e.g. shop.example.ir) [empty = serve on IP:PORT only]: " DOMAIN
+
+if [ -n "${DOMAIN}" ]; then
+  if port_busy 80; then
+    echo "!! WARNING: port 80 is already in use — nginx (needed for domain + SSL) may fail to start."
+    echo "   If your reverse/direct tunnel binds port 80 or 443 on this server, either:"
+    echo "     - install without a domain (shop served on IP:PORT), or"
+    echo "     - free ports 80/443 for nginx first."
+    ss -tlnp "sport = :80" 2>/dev/null || true
+    read -rp "Continue anyway? [y/N]: " GO_ON
+    [ "${GO_ON}" = "y" ] || exit 1
+  fi
+fi
 read -rp "Web port [3000]: " PORT
 PORT=${PORT:-3000}
+while port_busy "$PORT"; do
+  read -rp "Port ${PORT} is busy (tunnel listener?) — pick another: " PORT
+done
 read -rp "Admin username: " ADMIN_USER
 while [ -z "${ADMIN_USER}" ]; do read -rp "Admin username: " ADMIN_USER; done
 read -rsp "Admin password (min 8 chars): " ADMIN_PASS

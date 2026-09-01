@@ -189,6 +189,17 @@ cmd_ssl() {
   esac
 }
 
+# ---------------------------------------------------------------- doctor / ports
+cmd_doctor() {
+  cd "$APP_DIR" && node scripts/doctor.js
+}
+cmd_ports() {
+  echo -e "${c_info}── Listening ports ──${c_off}"
+  if command -v ss >/dev/null 2>&1; then ss -tlnp | sed 's/^/ /'; else netstat -tlnp | sed 's/^/ /'; fi
+  echo ""
+  dim " shop port: $(get_port) | shop must NOT share a port with tunnel listeners"
+}
+
 # ---------------------------------------------------------------- uninstall
 cmd_uninstall() {
   need_root
@@ -235,6 +246,8 @@ vpnshop — management CLI for VPN Config Shop
   vpnshop ssl letsencrypt <d>  enable HTTPS for domain (auto-renew on)
   vpnshop ssl renew            force renew certificates now
   vpnshop ssl remove           revert to plain HTTP
+  vpnshop doctor               health check: DB, panels/tunnel reachability, uploads
+  vpnshop ports                list all listening ports (tunnel conflict check)
   vpnshop uninstall [--purge]  remove service & nginx site
                                --purge also deletes data, receipts, certs
   vpnshop help                 this help
@@ -247,7 +260,8 @@ cmd_menu() {
     echo " 1) status        5) backup         9)  ssl manager"
     echo " 2) restart       6) restore        10) change port"
     echo " 3) logs          7) update         11) reset admin password"
-    echo " 4) info/help     8) admin user     0) exit  (u = uninstall)"
+    echo " 4) info/help     8) admin user     12) doctor (tunnel/panel check)"
+    echo "                                      13) ports         0) exit  (u = uninstall)"
     read -rp "choice: " a
     case "$a" in
       1) cmd_status ;;  2) cmd_restart ;; 3) read -rp "lines [50]: " n; cmd_logs "${n:-50}" ;;
@@ -258,6 +272,8 @@ cmd_menu() {
       9) cmd_ssl ;;
       10) read -rp "new port: " p; cmd_port "$p" ;;
       11) read -rp "username: " u; read -rsp "new password: " p; echo; cmd_admin "$u" "$p" ;;
+      12) cmd_doctor ;;
+      13) cmd_ports ;;
       u) cmd_uninstall ;;
       0) break ;;
     esac
@@ -282,6 +298,8 @@ case "${1:-menu}" in
   backup)   shift || true; cmd_backup "${1:-}" ;;
   restore)  shift || true; cmd_restore "${1:-}" ;;
   ssl)      shift || true; cmd_ssl "${1:-menu}" "${2:-}" ;;
+  doctor)   cmd_doctor ;;
+  ports)    cmd_ports ;;
   uninstall) shift || true; cmd_uninstall "$@" ;;
   *) err "unknown command: $1"; usage; exit 1 ;;
 esac
