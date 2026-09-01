@@ -28,7 +28,7 @@
 ## نصب سریع (Ubuntu 22.04 — دسترسی روت)
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/amir12120/vpnshop/main/install.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/amir12120/vpnshop/main/INSTALL.sh)
 ```
 
 اسکریپت مخزن را در `/opt/vpnshop` کلون می‌کند، پیش‌نیازها (Node 20، nginx) را نصب می‌کند و از شما **دامنه، پورت، نوع SSL و نام کاربری/رمز ادمین** را می‌پرسد. در پایان سایت روی دامنه/پورت انتخابی بالا می‌آید.
