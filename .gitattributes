@@ -1,0 +1,5 @@
+# Force LF everywhere — this code runs on Linux servers;
+# CRLF line endings break bash scripts (.sh) on Ubuntu.
+* text=auto eol=lf
+*.png binary
+*.jpg binary
