@@ -75,5 +75,5 @@ Common issues:
 |---|---|---|
 | Site not reachable | port taken / service stopped | `journalctl -u vpnshop -n 30` |
 | “Failed to connect to panel” on approve | tunnel down or wrong panel creds | re-run Test Connection on `/admin/panels` |
-| SSL issuance fails | DNS / port 80 | run `certbot --nginx -d DOMAIN` manually |
+| SSL issuance fails | DNS / port 80 | run `vpnshop ssl letsencrypt DOMAIN` (it handles nginx on port 80 automatically) |
 | Order approved but no QR | page cached / missing delivery row | refresh; check `journalctl` |
