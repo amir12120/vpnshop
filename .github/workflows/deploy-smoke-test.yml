@@ -54,8 +54,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Run INSTALL.sh non-interactively (no domain, port 3000, HTTP)
-        run: printf '\n3000\nadmin\nadminpass123\n' | sudo bash INSTALL.sh
+      - name: Run INSTALL.sh non-interactively (port 3000, no domain, HTTP)
+        run: printf '3000\n\nadmin\nadminpass123\n' | sudo bash INSTALL.sh
 
       - name: Verify shop is serving
         run: |
