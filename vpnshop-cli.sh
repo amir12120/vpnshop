@@ -9,6 +9,7 @@
 # ============================================================
 set -euo pipefail
 
+VERSION="1.1.0"
 APP_DIR="${VPN_SHOP_APP_DIR:-/opt/vpnshop}"
 SERVICE="vpnshop"
 NGINX_SITE="/etc/nginx/sites-available/vpnshop"
@@ -266,6 +267,7 @@ cmd_menu() {
 # ---------------------------------------------------------------- dispatch
 case "${1:-menu}" in
   help|-h|--help) usage; exit 0 ;;
+  --version|-v|version) echo "vpnshop CLI v${VERSION}"; exit 0 ;;
 esac
 [ -d "$APP_DIR" ] || { err "shop not installed at $APP_DIR — run INSTALL.sh first"; exit 1; }
 case "${1:-menu}" in
