@@ -113,6 +113,7 @@ echo ">> management CLI installed: vpnshop (run 'vpnshop help')"
 
 # admin user
 node seed-admin.js "$ADMIN_USER" "$ADMIN_PASS"
+chown -R www-data:www-data "$APP_DIR/data"   # db must be writable by the service user
 
 # ---------- systemd service ----------
 SECRET=$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')

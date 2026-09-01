@@ -1,0 +1,93 @@
+name: Deploy Smoke Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  tests:
+    name: E2E + negative test suites
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Syntax lint (JS + bash)
+        run: |
+          node --check server.js
+          node --check seed-admin.js
+          for f in lib/*.js test/*.js scripts/*.js; do node --check "$f"; done
+          bash -n INSTALL.sh
+          bash -n vpnshop-cli.sh
+
+      - name: Seed admin
+        run: node seed-admin.js admin adminpass123
+
+      - name: Boot mock Sanayi panel + shop
+        run: |
+          node test/mock-panel.js > mock.log 2>&1 &
+          PORT=3000 node server.js > shop.log 2>&1 &
+          for i in $(seq 1 30); do
+            curl -sf http://127.0.0.1:3000/ >/dev/null && break
+            sleep 1
+          done
+          curl -sf http://127.0.0.1:3000/ >/dev/null || { cat shop.log; exit 1; }
+
+      - name: Run e2e suite (21 checks)
+        run: node test/e2e.js 3000 2053
+
+      - name: Run negative suite (26 checks)
+        run: node test/e2e-negative.js 3000 2053
+
+  installer-smoke:
+    name: Full INSTALL.sh deploy on fresh Ubuntu
+    runs-on: ubuntu-22.04
+    needs: tests
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run INSTALL.sh non-interactively (no domain, port 3000, HTTP)
+        run: printf '\n3000\nadmin\nadminpass123\n' | sudo bash INSTALL.sh
+
+      - name: Verify shop is serving
+        run: |
+          ok=""
+          for i in $(seq 1 30); do
+            curl -sf http://127.0.0.1:3000/ >/dev/null && ok=1 && break
+            sleep 1
+          done
+          if [ "${ok:-}" != "1" ]; then sudo journalctl -u vpnshop -n 50 --no-pager; exit 1; fi
+          curl -sf http://127.0.0.1:3000/login | grep -q "ورود"
+          code=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3000/admin)
+          echo "GET /admin -> $code (200 expected: login page HTML)"
+          [ "$code" = "200" ]
+
+      - name: Verify admin login works (session issued)
+        run: |
+          code=$(curl -s -o /dev/null -w '%{http_code}' \
+            -d 'username=admin&password=adminpass123' \
+            -H 'Content-Type: application/x-www-form-urlencoded' \
+            http://127.0.0.1:3000/login)
+          echo "POST /login -> $code (302 expected)"
+          [ "$code" = "302" ]
+
+      - name: CLI smoke (status / doctor / ports)
+        run: |
+          sudo vpnshop status
+          sudo vpnshop doctor
+          sudo vpnshop ports | head -8
+          vpnshop --version
+
+      - name: Uninstall --purge and verify clean removal
+        run: |
+          printf 'y\ny\n' | sudo vpnshop uninstall --purge
+          sudo systemctl is-active vpnshop && exit 1 || echo "service removed"
+          [ ! -d /opt/vpnshop ] && echo "app dir removed"
