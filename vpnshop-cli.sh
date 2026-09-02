@@ -20,6 +20,7 @@ ok()   { echo -e " ${c_ok}✔${c_off} $*"; }
 err()  { echo -e " ${c_bad}✘${c_off} $*" >&2; }
 info() { echo -e " ${c_info}➜${c_off} $*"; }
 dim()  { echo -e " ${c_dim}$*${c_off}"; }
+warn() { echo -e " ${c_bad}⚠${c_off} $*"; }
 confirm() {
   local q="$1" def="${2:-n}" a
   read -rp "$q [$([ "$def" = y ] && echo Y/n || echo y/N)]: " a
@@ -52,21 +53,54 @@ cmd_logs()     { journalctl -u "$SERVICE" -n "${1:-50}" --no-pager; }
 cmd_update() {
   need_root
   info "pulling latest code..."
-  cd "$APP_DIR"
-  # app dir is owned by www-data; root git commands need safe.directory
-  git config --global --get-all safe.directory 2>/dev/null | grep -qx "$APP_DIR" || \
-    git config --global --add safe.directory "$APP_DIR"
-  git fetch origin main
-  local behind; behind=$(git rev-list HEAD..origin/main --count)
-  if [ "$behind" = "0" ]; then ok "already up to date"; else
-    git reset --hard origin/main
+  local mode; mode=$(cat "$APP_DIR/.repo-fetch-mode" 2>/dev/null || echo git)
+
+  tarball_refresh() {
+    local tmp; tmp=$(mktemp -d)
+    curl -fsSL --max-time 120 --retry 2 -o "$tmp/src.tar.gz" \
+      "https://codeload.github.com/amir12120/vpnshop/tar.gz/refs/heads/main" || { rm -rf "$tmp"; return 1; }
+    tar -xzf "$tmp/src.tar.gz" -C "$tmp" --strip-components=1 || { rm -rf "$tmp"; return 1; }
+    rsync -a --delete --exclude data --exclude node_modules --exclude public/uploads \
+      --exclude .repo-fetch-mode "$tmp/" "$APP_DIR/"
+    rm -rf "$tmp"
+  }
+
+  local updated=0
+  if [ -d "$APP_DIR/.git" ]; then
+    cd "$APP_DIR"
+    # app dir is owned by www-data; root git commands need safe.directory
+    git config --global --get-all safe.directory 2>/dev/null | grep -qx "$APP_DIR" || \
+      git config --global --add safe.directory "$APP_DIR"
+    if git -c credential.helper= -c credential.helper='' fetch origin main 2>/dev/null; then
+      local behind; behind=$(git rev-list HEAD..origin/main --count)
+      if [ "$behind" = "0" ]; then
+        ok "already up to date"
+      else
+        git reset --hard origin/main
+        updated=1
+        ok "pulled ${behind} new commit(s)"
+      fi
+    else
+      warn "git fetch failed (RPC 401 class) — falling back to tarball"
+      tarball_refresh || { err "tarball download also failed — check server internet"; exit 1; }
+      updated=1
+    fi
+  else
+    # tarball-based install (no .git) — refresh in place, keep data/uploads
+    info "tarball install — refreshing from GitHub..."
+    tarball_refresh || { err "tarball download failed — check server internet"; exit 1; }
+    updated=1
+  fi
+
+  if [ "$updated" = "1" ]; then
     info "installing dependencies..."
-    npm install --omit=dev --no-audit --no-fund
+    (cd "$APP_DIR" && npm install --omit=dev --no-audit --no-fund)
     systemctl restart "$SERVICE"
-    ok "updated and restarted (${behind} new commit(s))"
+    ok "updated and restarted"
   fi
   # keep the CLI itself current (self-heal for installs made before the CLI existed)
   install -m 0755 "$APP_DIR/vpnshop-cli.sh" /usr/local/bin/vpnshop
+  sed -i 's/\r$//' /usr/local/bin/vpnshop
   ok "CLI refreshed: $(command -v vpnshop)"
 }
 
