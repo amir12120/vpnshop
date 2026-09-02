@@ -18,12 +18,24 @@ cd /opt/vpnshop
 bash INSTALL.sh
 ```
 
-The installer starts with a **pre-flight phase** (server check → prerequisites → GitHub transport probe) before touching anything, then asks for:
+The installer starts with a **pre-flight phase** (server check → prerequisites → GitHub transport probe) before touching anything, then asks — in exactly this order:
 
-1. **Port** — default `3000` (internal app port; nginx proxies it). Re-checked live against running listeners, so tunnel ports are safe.
-2. **Domain** — e.g. `shop.example.ir`. Leave empty to run on `IP:PORT` only.
-3. **SSL mode** — `1` Let's Encrypt (needs DNS + port 80 open) or `2` none.
-4. **Admin username & password** (min 8 chars).
+1. **Username** — admin username (default label `Username :`)
+2. **Password** — admin password, min 8 chars, hidden while typing
+3. **Domain** — e.g. `shop.example.ir`. Leave empty to run on `IP:PORT` only.
+4. **Port** — the **public** port the shop is served on (default `8443`). With a domain, nginx terminates traffic on this port; the node backend runs on an internal port (port+1).
+5. **SSL mode** (only if a domain was given) — `1` Let's Encrypt → the shop is served at **`https://Domain:Port`**; `2` none → `http://Domain:Port`.
+
+When installation finishes, the summary shows every entry link in exactly that form, with the credentials you entered:
+
+```
+ Storefront (customers):  https://shop.example.ir:8443/
+ Register:                 https://shop.example.ir:8443/register
+ Login:                    https://shop.example.ir:8443/login
+ Admin panel:              https://shop.example.ir:8443/admin
+ Admin username:           admin
+ Admin password:           ********
+```
 
 It installs Node 24, nginx, a systemd unit, sets up the firewall, verifies the backend actually answers (no silent 502), and prints the final URL + admin credentials.
 

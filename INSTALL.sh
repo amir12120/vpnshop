@@ -9,6 +9,11 @@
 # ============================================================
 set -euo pipefail
 
+# the repo is PUBLIC — git must never prompt for credentials. A 'Username for
+# https://github.com' prompt means a transport/proxy problem, not real auth.
+export GIT_TERMINAL_PROMPT=0
+export GIT_ASKPASS=/bin/true
+
 APP_DIR=/opt/vpnshop
 REPO_URL="${VPN_SHOP_REPO:-https://github.com/amir12120/vpnshop.git}"
 BRANCH="${VPN_SHOP_BRANCH:-main}"
@@ -84,7 +89,7 @@ if [ ! -f server.js ]; then
     tarball_refresh
   elif [ "$FETCH_MODE" = "git" ]; then
     rm -rf "$APP_DIR"
-    if ! git clone --depth 1 -b "$BRANCH" "$REPO_URL" "$APP_DIR"; then
+    if ! git -c credential.helper= clone --depth 1 -b "$BRANCH" "$REPO_URL" "$APP_DIR"; then
       echo "   git clone failed — falling back to tarball"
       tarball_fetch "$APP_DIR" || { echo "!! could not fetch the repository"; exit 1; }
     fi
@@ -114,45 +119,57 @@ fi
 echo ">> update transport for this server: $(cat .repo-fetch-mode)"
 echo ""
 
-# ---------- port conflict check (tunnel-safe) ----------
+# ---------- prompts: Username / Password / Domain / Port ----------
 port_busy() {  # true if something is listening on $1
   ss -tlnH "sport = :$1" 2>/dev/null | grep -q . || netstat -tln 2>/dev/null | grep -q ":$1 "
 }
 
-read -rp "Web port [3000]: " PORT
-PORT=${PORT:-3000}
-while port_busy "$PORT"; do
+read -rp "Username : " ADMIN_USER
+while [ -z "${ADMIN_USER}" ]; do read -rp "Username : " ADMIN_USER; done
+
+read -rsp "Password : " ADMIN_PASS
+echo ""
+while [ ${#ADMIN_PASS} -lt 8 ]; do read -rsp "Password (min 8 chars) : " ADMIN_PASS; echo ""; done
+
+read -rp "Domain : " DOMAIN
+DOMAIN="$(printf '%s' "${DOMAIN:-}" | tr -d '[:space:]')"
+DOMAIN="${DOMAIN#http://}"; DOMAIN="${DOMAIN#https://}"; DOMAIN="${DOMAIN%/}"
+
+read -rp "Port : " PORT
+PORT=${PORT:-8443}
+while ! [[ "${PORT}" =~ ^[0-9]+$ ]] || [ "${PORT}" -lt 1 ] || [ "${PORT}" -gt 65535 ]; do
+  read -rp "Port (1-65535) : " PORT; PORT=${PORT:-8443}
+done
+while port_busy "${PORT}"; do
   echo "!! Port ${PORT} is already in use on this server:"
   ss -tlnp "sport = :${PORT}" 2>/dev/null || netstat -tlnp 2>/dev/null | grep ":${PORT} "
   echo "   This server may host tunnel listeners. Pick a different port."
-  read -rp "Web port: " PORT
+  read -rp "Port : " PORT
 done
-
-read -rp "Domain (e.g. shop.example.ir) [empty = serve on IP:PORT only]: " DOMAIN
-
-if [ -n "${DOMAIN}" ]; then
-  if port_busy 80; then
-    echo "!! WARNING: port 80 is already in use — nginx (needed for domain + SSL) may fail to start."
-    echo "   If your reverse/direct tunnel binds port 80 or 443 on this server, either:"
-    echo "     - install without a domain (shop served on IP:PORT), or"
-    echo "     - free ports 80/443 for nginx first."
-    ss -tlnp "sport = :80" 2>/dev/null || true
-    read -rp "Continue anyway? [y/N]: " GO_ON
-    [ "${GO_ON}" = "y" ] || exit 1
-  fi
-fi
-read -rp "Admin username: " ADMIN_USER
-while [ -z "${ADMIN_USER}" ]; do read -rp "Admin username: " ADMIN_USER; done
-read -rsp "Admin password (min 8 chars): " ADMIN_PASS
-echo ""
-while [ ${#ADMIN_PASS} -lt 8 ]; do read -rsp "Too short, try again: " ADMIN_PASS; echo ""; done
 
 SSL_MODE=""
 if [ -n "${DOMAIN}" ]; then
   echo "SSL mode:"
-  echo "  1) Let's Encrypt (free — needs DNS pointing here and port 80 open)"
-  echo "  2) No SSL (plain HTTP — e.g. if your CDN/proxy terminates SSL)"
+  echo "  1) Let's Encrypt (free — needs DNS pointing here; site becomes https://Domain:Port)"
+  echo "  2) No SSL (site served as http://Domain:Port)"
   read -rp "Choice [1/2]: " SSL_MODE
+  SSL_MODE=${SSL_MODE:-1}
+  if [ "${SSL_MODE}" = "1" ] && port_busy 80; then
+    echo "!! WARNING: port 80 is in use — the Let's Encrypt challenge needs it free during issuance."
+    ss -tlnp "sport = :80" 2>/dev/null || true
+    echo "   If a tunnel binds port 80 on this server, pick mode 2 or free port 80 later."
+    read -rp "Continue anyway? [y/N]: " GO_ON
+    [ "${GO_ON}" = "y" ] || exit 1
+  fi
+fi
+
+# internal app port: node listens here; nginx (if domain) takes the public port
+if [ -n "${DOMAIN}" ]; then
+  NODE_PORT=$((PORT + 1))
+  while [ "${NODE_PORT}" -le 65535 ] && port_busy "${NODE_PORT}"; do NODE_PORT=$((NODE_PORT + 1)); done
+  [ "${NODE_PORT}" -le 65535 ] || { echo "!! no free internal port next to ${PORT}"; exit 1; }
+else
+  NODE_PORT=${PORT}
 fi
 
 # ---------- system dependencies ----------
@@ -195,6 +212,10 @@ chown -R www-data:www-data "$APP_DIR/data"   # db must be writable by the servic
 
 # ---------- systemd service ----------
 SECRET=$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')
+# HOST: in domain mode the backend binds loopback only (nginx owns the public
+# port); without a domain node serves the public port itself on all interfaces.
+BIND_HOST=0.0.0.0
+[ -n "${DOMAIN}" ] && BIND_HOST=127.0.0.1
 cat >/etc/systemd/system/vpnshop.service <<EOF
 [Unit]
 Description=VPN Config Shop
@@ -204,7 +225,8 @@ After=network.target
 Type=simple
 WorkingDirectory=${APP_DIR}
 ExecStart=$(command -v node) ${APP_DIR}/server.js
-Environment=PORT=${PORT}
+Environment=PORT=${NODE_PORT}
+Environment=HOST=${BIND_HOST}
 Environment=NODE_ENV=production
 Environment=VPNSHOP_SECRET=${SECRET}
 Restart=always
@@ -219,10 +241,10 @@ systemctl daemon-reload
 systemctl enable --now vpnshop
 
 # ---------- verify the backend actually serves (avoid silent 502) ----------
-echo ">> waiting for the shop to answer on port ${PORT}..."
+echo ">> waiting for the shop to answer on internal port ${NODE_PORT}..."
 SHOP_UP=""
 for i in $(seq 1 20); do
-  curl -sf "http://127.0.0.1:${PORT}/" >/dev/null 2>&1 && { SHOP_UP=1; break; }
+  curl -sf "http://127.0.0.1:${NODE_PORT}/" >/dev/null 2>&1 && { SHOP_UP=1; break; }
   sleep 1
 done
 if [ -z "$SHOP_UP" ]; then
@@ -232,59 +254,76 @@ if [ -z "$SHOP_UP" ]; then
   echo "   Common causes:"
   echo "   - 'No such built-in module: node:sqlite' -> Node too old (need 22.5+). Fix:"
   echo "       curl -fsSL https://deb.nodesource.com/setup_24.x | bash - && apt-get install -y nodejs && systemctl restart vpnshop"
-  echo "   - 'port ${PORT} is already in use'       -> pick another port and reinstall"
+  echo "   - 'port ${NODE_PORT} is already in use'    -> pick another port and reinstall"
   echo "   - permission errors on data/vpnshop.db   -> chown -R www-data:www-data ${APP_DIR}/data"
   exit 1
 fi
-echo ">> backend verified: answering HTTP on port ${PORT}."
+echo ">> backend verified: answering HTTP on internal port ${NODE_PORT}."
 
-# ---------- nginx + ssl ----------
+# ---------- nginx: public port (TLS with cert, plain fallback without) ----------
 if [ -n "${DOMAIN}" ]; then
-  cat >/etc/nginx/sites-available/vpnshop <<EOF
+  if [ "${SSL_MODE}" = "1" ]; then
+    # issue the certificate FIRST (standalone, nginx stopped around it), then
+    # serve TLS directly on the public port the user chose — https://Domain:Port
+    ssl_issuance_error=""
+    vpnshop ssl issue --port "${PORT}" "${DOMAIN}" || ssl_issuance_error=1
+    if [ -n "${ssl_issuance_error}" ]; then
+      echo "!! SSL issuance failed — falling back to plain HTTP on port ${PORT}."
+      echo "   Check DNS (does ${DOMAIN} point to this server?), then retry:"
+      echo "     vpnshop ssl letsencrypt ${DOMAIN}"
+    fi
+  else
+    cat >/etc/nginx/sites-available/vpnshop <<EOF
 server {
-    listen 80;
+    listen ${PORT};
     server_name ${DOMAIN};
     client_max_body_size 12m;
     location / {
-        proxy_pass http://127.0.0.1:${PORT};
+        proxy_pass http://127.0.0.1:${NODE_PORT};
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-Proto \$scheme;
     }
 }
 EOF
-  ln -sf /etc/nginx/sites-available/vpnshop /etc/nginx/sites-enabled/vpnshop
-  rm -f /etc/nginx/sites-enabled/default
-  nginx -t && systemctl reload nginx
-
-  if [ "${SSL_MODE}" = "1" ]; then
-    # handles port-80 conflicts itself: stops nginx temporarily if it holds 80,
-    # issues the cert standalone, restarts nginx and configures the 443 block
-    vpnshop ssl letsencrypt "${DOMAIN}" || \
-      echo "!! SSL issuance failed — check DNS (does it point to this server?). Retry later with: vpnshop ssl letsencrypt ${DOMAIN}"
+    ln -sf /etc/nginx/sites-available/vpnshop /etc/nginx/sites-enabled/vpnshop
+    rm -f /etc/nginx/sites-enabled/default
+    nginx -t && systemctl reload nginx
   fi
 fi
 
 # ---------- firewall ----------
 if command -v ufw >/dev/null 2>&1; then
   ufw allow OpenSSH >/dev/null 2>&1 || true
-  ufw allow 80,443/tcp >/dev/null 2>&1 || true
-  if [ -z "${DOMAIN}" ]; then ufw allow "${PORT}/tcp" >/dev/null 2>&1 || true; fi
+  if [ -n "${DOMAIN}" ]; then
+    ufw allow "${PORT}/tcp" >/dev/null 2>&1 || true      # public port (nginx; TLS if SSL)
+    # internal node port stays firewalled OFF — reachable only via nginx/localhost
+  else
+    ufw allow "${PORT}/tcp" >/dev/null 2>&1 || true
+  fi
 fi
 
+# ---------- final summary: entry links in the https://Domain:Port form ----------
 echo ""
 echo "=============================="
 echo " Installation complete"
 if [ -n "${DOMAIN}" ]; then
-  SHOP_URL="http${SSL_MODE:+s}://${DOMAIN}"
+  if [ "${SSL_MODE}" = "1" ] && grep -q "listen ${PORT} ssl" /etc/nginx/sites-available/vpnshop 2>/dev/null; then
+    SHOP_URL="https://${DOMAIN}:${PORT}"
+  else
+    SHOP_URL="http://${DOMAIN}:${PORT}"
+  fi
 else
   SHOP_URL="http://$(curl -s --max-time 3 ifconfig.me 2>/dev/null || echo SERVER_IP):${PORT}"
 fi
-echo " Shop URL:        ${SHOP_URL}/"
 echo ""
-echo " Admin panel URL: ${SHOP_URL}/admin"
-echo " Admin username:  ${ADMIN_USER}"
-echo " Admin password:  ${ADMIN_PASS}"
+echo " Storefront (customers):  ${SHOP_URL}/"
+echo " Register:                 ${SHOP_URL}/register"
+echo " Login:                    ${SHOP_URL}/login"
+echo ""
+echo " Admin panel:              ${SHOP_URL}/admin"
+echo " Admin username:           ${ADMIN_USER}"
+echo " Admin password:           ${ADMIN_PASS}"
 echo " (keep these credentials safe — they grant full shop control)"
 echo ""
 echo " Manage anytime with:  vpnshop"

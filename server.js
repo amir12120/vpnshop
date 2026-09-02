@@ -701,6 +701,9 @@ server.on('error', (e) => {
   process.exit(1);
 });
 
-server.listen(PORT, () => {
-  console.log(`VPN shop listening on port ${PORT}`);
+// HOST env is optional: installers behind nginx set HOST=127.0.0.1 so the
+// backend is reachable only locally (the public port is nginx's).
+const HOST = process.env.HOST || '0.0.0.0';
+server.listen(PORT, HOST, () => {
+  console.log(`VPN shop listening on ${HOST}:${PORT}`);
 });
