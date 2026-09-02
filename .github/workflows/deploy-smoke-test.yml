@@ -114,16 +114,19 @@ jobs:
           sudo vpnshop ports | head -8
           vpnshop --version
 
-      - name: Safe uninstall keeps ALL data (service stops, files stay)
+      - name: Uninstall --keep-data preserves ALL data (service stops, files stay)
         run: |
-          printf 'y\n' | sudo vpnshop uninstall
+          printf 'y\n' | sudo vpnshop uninstall --keep-data
           sudo systemctl is-active vpnshop && exit 1 || echo "service stopped"
           [ -d /opt/vpnshop/data ] && echo "database preserved"
           [ -f /etc/nginx/sites-available/vpnshop ] && echo "nginx config preserved"
           [ -x /usr/local/bin/vpnshop ] && echo "CLI preserved"
+          # bring the service back so the next step has a live install
+          sudo systemctl enable --now vpnshop
 
-      - name: Uninstall --purge and verify clean removal
+      - name: Uninstall (default) and verify clean removal incl. database
         run: |
-          printf 'y\ny\ny\n' | sudo vpnshop uninstall --purge
+          printf 'y\ny\ny\n' | sudo vpnshop uninstall
           sudo systemctl is-active vpnshop && exit 1 || echo "service removed"
           [ ! -d /opt/vpnshop ] && echo "app dir removed"
+          [ ! -e /opt/vpnshop/data/vpnshop.db ] && echo "database removed — fresh install starts clean"

@@ -14,7 +14,7 @@
 # ============================================================
 set -euo pipefail
 
-VERSION="1.3.0"
+VERSION="1.4.0"
 REPO_OWNER="amir12120"
 REPO_NAME="vpnshop"
 BRANCH="${VPN_SHOP_BRANCH:-main}"
@@ -98,7 +98,7 @@ menu() {
     echo -e " ${c_bold}6)${c_off}  Ports                list listening ports (tunnel conflict check)"
     echo -e " ${c_bold}7)${c_off}  Backup / Restore     database + receipts + configs"
     echo -e " ${c_bold}8)${c_off}  Admin user           create / reset admin username & password"
-    echo -e " ${c_bold}9)${c_off}  ${c_bad}Uninstall${c_off}          stop & remove service — data is KEPT (--purge deletes it)"
+    echo -e " ${c_bold}9)${c_off}  ${c_bad}Uninstall${c_off}          FULL removal incl. database (asks first; --keep-data keeps files)"
     echo -e " ${c_bold}0)${c_off}  Exit"
     hr
     read -rp "  choice: " a

@@ -175,8 +175,8 @@ vpnshop admin admin رمز_جدید   # ساخت/ریست کاربر ادمین
 vpnshop backup                 # بکاپ دیتابیس + فیش‌ها + کانفیگ‌ها
 vpnshop restore backup.tar.gz  # بازگردانی بکاپ
 vpnshop install                # اجرای مجدد نصب‌کننده (داده‌های قبلی حفظ می‌شود)
-vpnshop uninstall              # توقف سرویس — همه داده‌ها، فایل‌ها و کانفیگ nginx حفظ می‌شود
-vpnshop uninstall --purge      # حذف کامل (دیتابیس، فیش‌ها و کل پوشه هم پاک می‌شود)
+vpnshop uninstall              # حذف کامل: سرویس، nginx، سرتیفیکت و دیتابیس همه پاک می‌شود (با تأیید شما)
+vpnshop uninstall --keep-data  # فقط توقف سرویس — دیتابیس، فیش‌ها و فایل‌ها حفظ می‌شود
 vpnshop help                   # لیست کامل دستورات
 ```
 
