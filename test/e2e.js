@@ -115,7 +115,7 @@ async function multipart(path, cookie, fields, file) {
 
   const ordersPage = await (await api('/orders', { cookie: custCookie })).res.text();
   check('order shows awaiting_review', ordersPage.includes('در انتظار تأیید مدیر'));
-  check('order not delivered yet', !ordersPage.includes('لینک اشتراک'));
+  check('order not delivered yet', !ordersPage.includes('لینک اشتراک (برای'));
 
   console.log('— admin: approve → auto-provision → delivery');
   const adminOrders = await (await api('/admin/orders', { cookie: adminCookie })).res.text();

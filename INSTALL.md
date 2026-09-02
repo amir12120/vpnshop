@@ -2,21 +2,23 @@
 
 Deploy `vpnshop/` to an Ubuntu 22.04 server (Iran box, reachable by customers), then configure and test the full order flow.
 
-## 1. Transfer the code to the server
+## 1. Open the CLI (works on a fresh server — nothing installed yet)
 
-From your workstation:
-
-```bash
-ssh root@IRAN_SERVER_IP "apt update && apt install -y git"
-git clone https://github.com/amir12120/vpnshop.git /opt/vpnshop
-cd /opt/vpnshop
-```
-
-## 2. Run the installer
+On the server, run the one-liner:
 
 ```bash
-bash INSTALL.sh
+bash <(curl -fsSL https://raw.githubusercontent.com/amir12120/vpnshop/main/cli.sh)
 ```
+
+This opens the **bootstrap CLI menu** immediately. Choose **`1) Install`** to install the shop. Alternatively, the bootstrap can run the installer directly:
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/amir12120/vpnshop/main/cli.sh) install
+```
+
+After installation the same menu stays available as `vpnshop` (installed to `/usr/local/bin/vpnshop`) — including Install, SSL manager, Update, Uninstall, Doctor, Ports and more.
+
+## 2. What the installer asks
 
 The installer starts with a **pre-flight phase** (server check → prerequisites → GitHub transport probe) before touching anything, then asks — in exactly this order:
 
