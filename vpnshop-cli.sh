@@ -279,10 +279,14 @@ ssl_letsencrypt() {  # [--port N] [domain] — shop address becomes https://Doma
   issue_cert "$domain" || { err "certificate issuance failed — check DNS points to this server"; return 1; }
 
   write_ssl_vhost "$domain" "$pport"
-  nginx -t >/dev/null 2>&1 && systemctl reload nginx \
+  nginx -t >/dev/null 2>&1 && {
+    systemctl enable --now nginx >/dev/null 2>&1 || true
+    systemctl reload nginx 2>/dev/null || systemctl restart nginx
+  } \
     && ok "HTTPS enabled: https://${domain}:${pport}"
   install_renewal_hooks
 }
+
 ssl_remove() {
   need_root
   local domain; domain=$(get_domain)

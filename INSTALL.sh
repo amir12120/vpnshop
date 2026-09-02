@@ -262,17 +262,7 @@ echo ">> backend verified: answering HTTP on internal port ${NODE_PORT}."
 
 # ---------- nginx: public port (TLS with cert, plain fallback without) ----------
 if [ -n "${DOMAIN}" ]; then
-  if [ "${SSL_MODE}" = "1" ]; then
-    # issue the certificate FIRST (standalone, nginx stopped around it), then
-    # serve TLS directly on the public port the user chose — https://Domain:Port
-    ssl_issuance_error=""
-    vpnshop ssl issue --port "${PORT}" "${DOMAIN}" || ssl_issuance_error=1
-    if [ -n "${ssl_issuance_error}" ]; then
-      echo "!! SSL issuance failed — falling back to plain HTTP on port ${PORT}."
-      echo "   Check DNS (does ${DOMAIN} point to this server?), then retry:"
-      echo "     vpnshop ssl letsencrypt ${DOMAIN}"
-    fi
-  else
+  write_http_vhost() {
     cat >/etc/nginx/sites-available/vpnshop <<EOF
 server {
     listen ${PORT};
@@ -286,10 +276,27 @@ server {
     }
 }
 EOF
-    ln -sf /etc/nginx/sites-available/vpnshop /etc/nginx/sites-enabled/vpnshop
-    rm -f /etc/nginx/sites-enabled/default
-    nginx -t && systemctl reload nginx
+  }
+
+  [ "${SSL_MODE}" != "1" ] && write_http_vhost
+  ln -sf /etc/nginx/sites-available/vpnshop /etc/nginx/sites-enabled/vpnshop
+  rm -f /etc/nginx/sites-enabled/default
+
+  if [ "${SSL_MODE}" = "1" ]; then
+    # issue the certificate FIRST (standalone, nginx stopped around it), then
+    # serve TLS directly on the public port the user chose — https://Domain:Port
+    if ! vpnshop ssl issue --port "${PORT}" "${DOMAIN}"; then
+      echo "!! SSL issuance failed — serving plain HTTP on port ${PORT} instead."
+      echo "   Check DNS (does ${DOMAIN} point to this server?), then retry:"
+      echo "     vpnshop ssl letsencrypt --port ${PORT} ${DOMAIN}"
+      write_http_vhost
+    fi
   fi
+
+  # start nginx if it is not running yet, then apply the vhost (reload, or
+  # restart as a fallback — 'reload' fails on a stopped service)
+  nginx -t && { systemctl enable --now nginx >/dev/null 2>&1 || true; \
+    systemctl reload nginx 2>/dev/null || systemctl restart nginx; }
 fi
 
 # ---------- firewall ----------
