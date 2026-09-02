@@ -110,7 +110,7 @@ async function multipart(path, cookie, fields, file) {
   const buyPage = await (await api(`/buy/${planId}`, { cookie: custCookie })).res.text();
   check('buy page shows card number', buyPage.includes('6037-9911-1234-5678'));
 
-  r = await multipart(`/buy/${planId}`, custCookie, { note: 'کارت ۴۲۴۲' }, { field: 'receipt', buf: png });
+  r = await multipart(`/buy/${planId}`, custCookie, { note: 'کارت ۴۲۴۲', client_name: 'alireza' }, { field: 'receipt', buf: png });
   check('receipt upload accepted', r.status === 302);
 
   const ordersPage = await (await api('/orders', { cookie: custCookie })).res.text();
@@ -121,19 +121,21 @@ async function multipart(path, cookie, fields, file) {
   const adminOrders = await (await api('/admin/orders', { cookie: adminCookie })).res.text();
   const orderId = (adminOrders.match(/\/admin\/orders\/(\d+)\/approve/) || [])[1];
   check('approve form rendered', !!orderId);
+  check('requested client name shown to admin', adminOrders.includes('alireza'));
   const receiptVisible = adminOrders.includes('data:image/png') || adminOrders.includes('/uploads/receipt_');
   check('receipt image shown to admin', receiptVisible);
 
   r = await api(`/admin/orders/${orderId}/approve`, {
     method: 'POST', cookie: adminCookie,
-    form: new URLSearchParams({ panel_id: panelId, inbound_id: '1' }),
+    form: new URLSearchParams({ panel_id: panelId, inbound_ids: '1' }),
   });
   check('approve POST ok', r.res.status === 302);
 
   const custOrders2 = await (await api('/orders', { cookie: custCookie })).res.text();
   check('order delivered', custOrders2.includes('تحویل شده'));
   check('QR code rendered', custOrders2.includes('data:image/png;base64,'));
-  check('subscription link shown', /http:\/\/127\.0\.0\.1:\d+\/sub\/u\d+o\d+/.test(custOrders2));
+  check('custom username used in sub link', custOrders2.includes('/sub/alireza'));
+  check('subscription link shown', /http:\/\/127\.0\.0\.1:\d+\/sub\/[A-Za-z0-9_@.-]+/.test(custOrders2));
   check('config link (vless) shown', custOrders2.includes('vless://'));
 
   console.log('— security: private receipt');

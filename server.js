@@ -59,6 +59,15 @@ function esc(s) {
 function fmtDate(d) { return d || '—'; }
 function fmtToman(n) { return Number(n).toLocaleString('fa-IR'); }
 
+// Customer's chosen config username → client email on the Sanayi panel.
+// 3x-ui forbids spaces, '/', '\' and control chars in emails. Empty input
+// (or input that sanitizes to nothing) means "auto-generate".
+function sanitizeClientName(s) {
+  let v = String(s || '').trim().replace(/[\s/\\\x00-\x1f\x7f]/g, '');
+  v = v.replace(/^[^a-zA-Z0-9]+/, '');
+  return v.slice(0, 60);
+}
+
 // current user from session cookie (null if none)
 function getUser(req) {
   const sess = parseSession(parseCookies(req).session);
@@ -308,6 +317,8 @@ route('GET', '/buy/:planId', async (req, res, { user, params, query }) => {
     <form method="post" action="/buy/${plan.id}" enctype="multipart/form-data">
       <label>تصویر فیش واریزی (jpg / png / webp — حداکثر ۸ مگابایت)</label>
       <input type="file" name="receipt" accept="image/*" required>
+      <label>نام کاربری دلخواه برای کانفیگ (اختیاری — مثلاً alireza یا alireza@mail.com)</label>
+      <input name="client_name" placeholder="اگر خالی بگذارید، خودکار ساخته می‌شود">
       <label>توضیح (اختیاری — مثلاً ۴ رقم آخر کارت واریزکننده)</label>
       <input name="note">
       <button>ثبت سفارش و ارسال فیش</button>
@@ -327,7 +338,7 @@ route('POST', '/buy/:planId', async (req, res, { user, params }) => {
   if (!m) return redirect(res, `/buy/${plan.id}?err=` + encodeURIComponent('فرم نامعتبر است'));
   const boundary = '--' + (m[1] || m[2]);
 
-  let receiptPath = null, note = '';
+  let receiptPath = null, note = '', clientName = '';
   const parts = body.toString('binary').split(boundary).slice(1, -1);
   for (const part of parts) {
     const headerEnd = part.indexOf('\r\n\r\n');
@@ -339,6 +350,8 @@ route('POST', '/buy/:planId', async (req, res, { user, params }) => {
     const fieldName = nameMatch[1];
     if (fieldName === 'note') {
       note = Buffer.from(content.replace(/\r\n$/, ''), 'binary').toString('utf8');
+    } else if (fieldName === 'client_name') {
+      clientName = Buffer.from(content.replace(/\r\n$/, ''), 'binary').toString('utf8');
     } else if (fieldName === 'receipt') {
       const fileMatch = /filename="([^"]*)"/.exec(headers);
       const ctypeMatch = /Content-Type:\s*([^\r\n]+)/i.exec(headers);
@@ -355,8 +368,9 @@ route('POST', '/buy/:planId', async (req, res, { user, params }) => {
   }
   if (!receiptPath) return redirect(res, `/buy/${plan.id}?err=` + encodeURIComponent('تصویر فیش الزامی است'));
 
-  db.prepare(`INSERT INTO orders (user_id, plan_id, status, receipt_path, receipt_note)
-              VALUES (?, ?, 'awaiting_review', ?, ?)`).run(user.id, plan.id, receiptPath, note.trim() || null);
+  const cleanName = sanitizeClientName(clientName);
+  db.prepare(`INSERT INTO orders (user_id, plan_id, status, receipt_path, receipt_note, client_name)
+              VALUES (?, ?, 'awaiting_review', ?, ?, ?)`).run(user.id, plan.id, receiptPath, note.trim() || null, cleanName || null);
   redirect(res, '/orders?ok=' + encodeURIComponent('سفارش ثبت شد. پس از تأیید مدیر، کانفیگ‌ها تحویل داده می‌شود.'));
 });
 
@@ -387,7 +401,8 @@ route('GET', '/orders', async (req, res, { user, query }) => {
     ${o.sub_url ? `
       <h2 style="margin-top:14px">تحویل سفارش</h2>
       <img class="qr" src="${o.qr_data_url}" alt="QR" width="180" height="180">
-      <label>لینک اشتراک (برای اپ‌های V2rayNG / Streisand / ...)</label>
+      <div class="mut">نام کاربری کانفیگ: <b dir="ltr">${esc((o.sub_url || '').split('/').pop())}</b></div>
+      <label style="margin-top:10px">لینک اشتراک (برای اپ‌های V2rayNG / Streisand / ...)</label>
       <div class="mono">${esc(o.sub_url)}</div>
       <label style="margin-top:10px">لینک کانفیگ‌ها</label>
       ${(JSON.parse(o.config_json || '[]')).map((l) => `<div class="mono">${esc(l)}</div>`).join('')}
@@ -451,6 +466,8 @@ route('GET', '/admin/orders', async (req, res, ctx) => {
   };
   const body = `
   <h1>سفارش‌ها</h1>
+  ${query.err ? `<div class="msg err">⚠ ${esc(query.err)}</div>` : ''}
+  ${query.ok ? `<div class="msg ok">✓ ${esc(query.ok)}</div>` : ''}
   <div class="row mut" style="margin-bottom:12px">
     <a href="/admin/orders">همه</a> | <a href="/admin/orders?status=awaiting_review">در انتظار تأیید</a> | <a href="/admin/orders?status=delivered">تحویل‌شده</a> | <a href="/admin/orders?status=rejected">رد‌شده</a>
   </div>
@@ -461,6 +478,8 @@ route('GET', '/admin/orders', async (req, res, ctx) => {
       <span class="badge b-${o.status}">${statusFa[o.status] || o.status}</span>
     </div>
     <div class="mut">ثبت: ${fmtDate(o.created_at)}</div>
+    ${o.client_name ? `<div class="mut">نام کاربری دلخواه کانفیگ: <b dir="ltr">${esc(o.client_name)}</b></div>` : ''}
+    ${o.admin_note ? `<div class="msg ${o.status === 'rejected' ? 'err' : 'err'}" style="margin:8px 0 0">${esc(o.admin_note)}</div>` : ''}
     ${o.receipt_path ? `<p><img src="${esc(o.receipt_path)}" alt="فیش" style="max-width:340px;max-height:340px;border-radius:8px;border:1px solid var(--line)"></p>
       ${o.receipt_note ? `<div class="mut">توضیح مشتری: ${esc(o.receipt_note)}</div>` : ''}` : '<p class="mut">فیشی بارگذاری نشده</p>'}
     ${o.sub_url ? `<label>لینک تحویل‌شده:</label><div class="mono">${esc(o.sub_url)}</div>` : ''}
@@ -504,12 +523,25 @@ async function provisionOrder(order, panelId, inboundIdsRaw) {
   if (!inbounds.length) throw new Error('Inbound مشخص نشده است (در فرم بنویسید، مثلاً 1,2,3)');
 
   const client = new SanayiClient({ baseUrl: panel.base_url, username: panel.username, password: panel.password, apiToken: panel.api_token, subUrl: panel.sub_url });
-  const email = `u${user.id}o${order.id}_${randomToken(4)}`;
+  // Customer's chosen username is preferred; if the panel says it's taken we
+  // retry with a suffix (ali → ali_2 → ali_3...) so delivery always succeeds.
+  let email = order.client_name || '';
+  if (!email) email = `u${user.id}o${order.id}_${randomToken(4)}`;
+  const baseEmail = email;
   const uuid = crypto.randomUUID();
   const totalGB = plan.volume_gb == null ? 0 : Math.round(plan.volume_gb * 1024 * 1024 * 1024);
   const expiryTime = plan.duration_days == null ? 0 : Date.now() + plan.duration_days * 24 * 3600 * 1000;
 
-  await client.addClient({ inboundIds: inbounds, email, uuid, totalGB, expiryTime, limitIp: plan.device_limit ?? 2 });
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await client.addClient({ inboundIds: inbounds, email, uuid, totalGB, expiryTime, limitIp: plan.device_limit ?? 2 });
+      break; // client created
+    } catch (e) {
+      const taken = /already in use|already exists|duplicate/i.test(e.message || '');
+      if (!taken || attempt >= 5 || order.client_name == null) throw e;
+      email = `${baseEmail}_${attempt + 1}`; // ali → ali_2
+    }
+  }
   const links = await client.getClientLinks({ inboundIds: inbounds, email });
 
   db.prepare(`INSERT INTO deliveries (order_id, panel_id, sub_url, config_json, qr_data_url)
