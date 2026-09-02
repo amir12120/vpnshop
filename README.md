@@ -35,6 +35,21 @@ bash <(curl -fsSL https://raw.githubusercontent.com/amir12120/vpnshop/main/INSTA
 
 اسکریپت مخزن را در `/opt/vpnshop` کلون می‌کند، پیش‌نیازها (Node 24، nginx) را نصب می‌کند و از شما **دامنه، پورت، نوع SSL و نام کاربری/رمز ادمین** را می‌پرسد. در پایان سایت روی دامنه/پورت انتخابی بالا می‌آید.
 
+#### نصب با احتیاط کامل (پیش‌نیازها و بررسی سرور قبل از شروع)
+
+نصب‌کننده حالا **قبل از هر تغییری** یک فاز pre-flight اجرا می‌کند:
+
+1. **بررسی سرور** — دسترسی روت، نسخه اوبونتو، معماری CPU، فضای دیسک (حداقل ۲ گیگ)، رم، و اتصال خروجی اینترنت
+2. **نصب پیش‌نیازها** — git، curl، rsync، tar، openssl و ca-certificates (فقط موارد غایب نصب می‌شوند)
+3. **تست دسترسی به گیت‌هاب** — دو مسیر جداگانه امتحان می‌شود: پروتکل git (همان مسیری که خطای `RPC failed; HTTP 401` می‌دهد) و دانلود مستقیم tarball. هرکدام کار کرد، استفاده می‌شود — اگر git روی سرور شما بلاک یا خراب بود (مثلاً به‌خاطر credential قدیمی یا پروکسی)، نصب **به‌طور خودکار با دانلود tarball ادامه پیدا می‌کند** و متوقف نمی‌شود.
+
+برای دیباگ دستی یک سرور:
+
+```bash
+bash /opt/vpnshop/scripts/preflight.sh
+# خروجی: REPO_FETCH_MODE=git  یا  tarball
+```
+
 ## نصب دستی
 
 ```bash
@@ -44,6 +59,12 @@ npm install
 node seed-admin.js admin YOUR_ADMIN_PASSWORD   # نام کاربری و رمز ادمین
 PORT=3000 node server.js                        # اجرا (در پروداکشن: systemd / INSTALL.sh)
 ```
+
+> اگر روی سرور ایران هنگام `git clone` خطای `RPC failed; HTTP 401` گرفتید، نصب‌کننده خودش به دانلود tarball سوئیچ می‌کند — یا دستی:
+> ```bash
+> curl -fsSL https://codeload.github.com/amir12120/vpnshop/tar.gz/refs/heads/main -o /tmp/vpnshop.tar.gz
+> mkdir -p /opt/vpnshop && tar -xzf /tmp/vpnshop.tar.gz -C /opt/vpnshop --strip-components=1
+> ```
 
 یا همه‌چیز (nginx، systemd، certbot، فایروال) خودکار:
 

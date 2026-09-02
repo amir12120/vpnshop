@@ -18,14 +18,23 @@ cd /opt/vpnshop
 bash INSTALL.sh
 ```
 
-The installer asks for:
+The installer starts with a **pre-flight phase** (server check → prerequisites → GitHub transport probe) before touching anything, then asks for:
 
-1. **Domain** — e.g. `shop.example.ir`. Leave empty to run on `IP:PORT` only.
-2. **Port** — default `3000` (internal app port; nginx proxies it).
+1. **Port** — default `3000` (internal app port; nginx proxies it). Re-checked live against running listeners, so tunnel ports are safe.
+2. **Domain** — e.g. `shop.example.ir`. Leave empty to run on `IP:PORT` only.
 3. **SSL mode** — `1` Let's Encrypt (needs DNS + port 80 open) or `2` none.
 4. **Admin username & password** (min 8 chars).
 
-It installs Node 20, nginx, a systemd unit, sets up the firewall, and prints the final URL.
+It installs Node 24, nginx, a systemd unit, sets up the firewall, verifies the backend actually answers (no silent 502), and prints the final URL + admin credentials.
+
+### If you ever see `RPC failed; HTTP 401` while cloning
+
+That error comes from git's smart-HTTP transport being blocked or polluted by stale credentials on the server — it happens on **public** repos too. The installer now probes the git transport first (with credential helpers disabled) and **automatically falls back to a plain tarball download** if git fails. To diagnose a server manually:
+
+```bash
+bash /opt/vpnshop/scripts/preflight.sh   # standalone: server + prereqs + GitHub test
+# prints REPO_FETCH_MODE=git|tarball
+```
 
 ## 3. Verify the service
 
@@ -76,4 +85,5 @@ Common issues:
 | Site not reachable | port taken / service stopped | `journalctl -u vpnshop -n 30` |
 | “Failed to connect to panel” on approve | tunnel down or wrong panel creds | re-run Test Connection on `/admin/panels` |
 | SSL issuance fails | DNS / port 80 | run `vpnshop ssl letsencrypt DOMAIN` (it handles nginx on port 80 automatically) |
+| `RPC failed; HTTP 401` on clone/update | git smart-HTTP blocked or stale credentials on the server | installer/update auto-fall back to tarball; diagnose with `bash scripts/preflight.sh` |
 | Order approved but no QR | page cached / missing delivery row | refresh; check `journalctl` |

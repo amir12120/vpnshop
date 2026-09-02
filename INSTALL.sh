@@ -23,19 +23,77 @@ if [ ! -f server.js ]; then
     echo "!! This installer targets Ubuntu 22.04 — install manually on other distros."
     exit 1
   fi
-  echo ">> Running remotely — installing git and fetching the repository..."
+  # ---- step 1/3: prerequisites needed just to fetch the code ----
+  echo ">> [1/3] Installing fetch prerequisites (git, curl, rsync, tar)..."
+  export DEBIAN_FRONTEND=noninteractive
   apt-get update -y
-  apt-get install -y git curl rsync
+  apt-get install -y --no-install-recommends git curl ca-certificates rsync tar
+
+  # ---- step 2/3: pick the GitHub transport that actually works ----
+  # 'RPC failed; HTTP 401' comes from git's smart-HTTP upload-pack RPC. It can
+  # hit PUBLIC repos too when a stale credential.helper / proxy auth interferes.
+  # We probe git first (credentials stripped), then fall back to a plain tarball.
+  slug="$(printf '%s' "$REPO_URL" | sed -E 's#^https?://github\.com/##; s#\.git$##')"
+  tarball_url="https://codeload.github.com/${slug}/tar.gz/refs/heads/${BRANCH}"
+  echo ">> [2/3] Testing GitHub transport (this is where 'RPC failed; HTTP 401' comes from)..."
+  FETCH_MODE=""
+  if GIT_TERMINAL_PROMPT=0 git -c credential.helper= -c credential.helper='' \
+       ls-remote --heads "$REPO_URL" "refs/heads/$BRANCH" >/dev/null 2>&1; then
+    FETCH_MODE=git
+    echo "   git transport OK — will clone normally"
+  elif curl -fsSL --max-time 20 --retry 2 -o /dev/null "$tarball_url" 2>/dev/null; then
+    FETCH_MODE=tarball
+    echo "   git transport BLOCKED (the 'RPC failed; HTTP 401' you saw)"
+    echo "   → switching to a plain tarball download — works on every public repo"
+  else
+    echo "!! GitHub is unreachable from this server (git AND tarball both failed)."
+    echo "   Check the server's internet/DNS/proxy, then re-run the installer."
+    exit 1
+  fi
+
+  tarball_fetch() {  # $1 = destination dir
+    local tmp; tmp=$(mktemp -d)
+    curl -fsSL --max-time 120 --retry 2 -o "$tmp/src.tar.gz" "$tarball_url" || { rm -rf "$tmp"; return 1; }
+    mkdir -p "$1"
+    tar -xzf "$tmp/src.tar.gz" -C "$1" --strip-components=1 || { rm -rf "$tmp"; return 1; }
+    rm -rf "$tmp"
+  }
+  tarball_refresh() {  # refresh an existing tarball install in place, keep data/uploads
+    local tmp; tmp=$(mktemp -d)
+    curl -fsSL --max-time 120 --retry 2 -o "$tmp/src.tar.gz" "$tarball_url" || { rm -rf "$tmp"; return 1; }
+    tar -xzf "$tmp/src.tar.gz" -C "$tmp" --strip-components=1 || { rm -rf "$tmp"; return 1; }
+    rsync -a --delete --exclude data --exclude node_modules --exclude public/uploads \
+      --exclude .repo-fetch-mode "$tmp/" "$APP_DIR/"
+    rm -rf "$tmp"
+  }
+
+  # ---- step 3/3: fetch the repository ----
+  echo ">> [3/3] Fetching the repository ($FETCH_MODE mode)..."
   if [ -d "$APP_DIR/.git" ]; then
-    echo ">> Existing installation found — updating..."
-    cd "$APP_DIR"
-    git fetch origin "$BRANCH"
-    git reset --hard "origin/$BRANCH"
+    echo "   Existing installation found — updating via git..."
+    git config --global --get-all safe.directory 2>/dev/null | grep -qx "$APP_DIR" || \
+      git config --global --add safe.directory "$APP_DIR"
+    if git -C "$APP_DIR" -c credential.helper= -c credential.helper='' fetch origin "$BRANCH" 2>/dev/null; then
+      git -C "$APP_DIR" reset --hard "origin/$BRANCH"
+    else
+      echo "   git fetch failed — refreshing via tarball instead"
+      tarball_refresh
+    fi
+  elif [ -f "$APP_DIR/server.js" ]; then
+    echo "   Existing installation found — refreshing via tarball..."
+    tarball_refresh
+  elif [ "$FETCH_MODE" = "git" ]; then
+    rm -rf "$APP_DIR"
+    if ! git clone --depth 1 -b "$BRANCH" "$REPO_URL" "$APP_DIR"; then
+      echo "   git clone failed — falling back to tarball"
+      tarball_fetch "$APP_DIR" || { echo "!! could not fetch the repository"; exit 1; }
+    fi
   else
     rm -rf "$APP_DIR"
-    git clone --depth 1 -b "$BRANCH" "$REPO_URL" "$APP_DIR"
-    cd "$APP_DIR"
+    tarball_fetch "$APP_DIR" || { echo "!! could not download the repository tarball"; exit 1; }
   fi
+  echo "$FETCH_MODE" > "$APP_DIR/.repo-fetch-mode"
+  cd "$APP_DIR"
   exec bash INSTALL.sh   # continue from inside the checkout
 fi
 
@@ -43,6 +101,18 @@ fi
 echo "=============================="
 echo " VPN Shop — Installer"
 echo "=============================="
+
+# ---------- pre-flight: verify the server BEFORE touching anything ----------
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/scripts/preflight.sh"
+pf_server_check   || exit 1
+pf_install_prereqs || exit 1
+# remember how THIS server fetches the repo — `vpnshop update` honors it
+if [ ! -f .repo-fetch-mode ]; then
+  pf_github_check "$REPO_URL" "$BRANCH" || true
+  echo "${REPO_FETCH_MODE:-git}" > .repo-fetch-mode
+fi
+echo ">> update transport for this server: $(cat .repo-fetch-mode)"
+echo ""
 
 # ---------- port conflict check (tunnel-safe) ----------
 port_busy() {  # true if something is listening on $1
@@ -117,7 +187,7 @@ fi
 
 # the app dir is owned by www-data but git commands (vpnshop update) run as
 # root — mark it safe so git never refuses with "dubious ownership"
-git config --global --add safe.directory "$APP_DIR"
+[ -d "$APP_DIR/.git" ] && git config --global --add safe.directory "$APP_DIR"
 
 # admin user
 node seed-admin.js "$ADMIN_USER" "$ADMIN_PASS"
