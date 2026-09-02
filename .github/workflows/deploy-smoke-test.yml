@@ -27,6 +27,7 @@ jobs:
           for f in lib/*.js test/*.js scripts/*.js; do node --check "$f"; done
           bash -n INSTALL.sh
           bash -n vpnshop-cli.sh
+          bash -n cli.sh
           bash -n scripts/preflight.sh
 
       - name: Seed admin
@@ -55,9 +56,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Run INSTALL.sh non-interactively (domain mode, public port 8443, SSL off)
+      - name: Install via the bootstrap CLI (cli.sh install) — domain mode, public port 8443, SSL off
         # prompt order: Username / Password / Domain / Port [ / SSL choice ]
-        run: printf 'admin\nadminpass123\nshop.test.local\n8443\n2\n' | sudo bash INSTALL.sh
+        run: printf 'admin\nadminpass123\nshop.test.local\n8443\n2\n' | sudo bash cli.sh install
 
       - name: Verify pre-flight + GitHub transport probe ran
         run: |
@@ -111,8 +112,16 @@ jobs:
           sudo vpnshop ports | head -8
           vpnshop --version
 
+      - name: Safe uninstall keeps ALL data (service stops, files stay)
+        run: |
+          printf 'y\n' | sudo vpnshop uninstall
+          sudo systemctl is-active vpnshop && exit 1 || echo "service stopped"
+          [ -d /opt/vpnshop/data ] && echo "database preserved"
+          [ -f /etc/nginx/sites-available/vpnshop ] && echo "nginx config preserved"
+          [ -x /usr/local/bin/vpnshop ] && echo "CLI preserved"
+
       - name: Uninstall --purge and verify clean removal
         run: |
-          printf 'y\ny\n' | sudo vpnshop uninstall --purge
+          printf 'y\ny\ny\n' | sudo vpnshop uninstall --purge
           sudo systemctl is-active vpnshop && exit 1 || echo "service removed"
           [ ! -d /opt/vpnshop ] && echo "app dir removed"

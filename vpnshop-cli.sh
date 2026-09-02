@@ -9,7 +9,7 @@
 # ============================================================
 set -euo pipefail
 
-VERSION="1.2.0"
+VERSION="1.3.0"
 APP_DIR="${VPN_SHOP_APP_DIR:-/opt/vpnshop}"
 SERVICE="vpnshop"
 NGINX_SITE="/etc/nginx/sites-available/vpnshop"
@@ -363,30 +363,51 @@ cmd_ports() {
 }
 
 # ---------------------------------------------------------------- uninstall
+# DEFAULT (no flags): stop + disable the service. EVERYTHING is kept —
+# app code, database, receipts, nginx config, certificates — so nothing
+# about the shop is lost and `vpnshop install` can bring it back anytime.
+# Only --purge performs the destructive full removal.
 cmd_uninstall() {
   need_root
   local purge=false
   for a in "$@"; do [ "$a" = "--purge" ] && purge=true; done
-  echo -e "${c_bad}This will remove the vpnshop service and nginx site.${c_off}"
-  $purge && echo -e "${c_bad}--purge: database, receipts and /opt/vpnshop will be DELETED permanently.${c_off}"
-  confirm "continue with uninstall?" || { dim "aborted"; return 0; }
-
-  systemctl disable --now "$SERVICE" 2>/dev/null || true
-  rm -f /etc/systemd/system/${SERVICE}.service && systemctl daemon-reload
-  rm -f "$NGINX_ENABLED" "$NGINX_SITE" 2>/dev/null || true
-  nginx -t >/dev/null 2>&1 && systemctl reload nginx || true
-  ok "service and nginx site removed"
 
   if $purge; then
+    echo -e "${c_bad}FULL removal (--purge): service, nginx site, data and /opt/vpnshop will be DELETED.${c_off}"
+    confirm "continue with full uninstall (--purge)?" || { dim "aborted"; return 0; }
+  else
+    echo -e "${c_bad}This stops the shop service.${c_off}"
+    dim "Your data is NOT touched: database, receipts, app files and nginx config stay."
+    dim "To bring the shop back later, run:  vpnshop install"
+    confirm "stop the vpnshop service?" || { dim "aborted"; return 0; }
+  fi
+
+  systemctl disable --now "$SERVICE" 2>/dev/null || true
+  ok "service vpnshop stopped and disabled (starts on boot: off)"
+
+  if $purge; then
+    rm -f /etc/systemd/system/${SERVICE}.service && systemctl daemon-reload
+    rm -f "$NGINX_ENABLED" "$NGINX_SITE" 2>/dev/null || true
+    nginx -t >/dev/null 2>&1 && systemctl reload nginx || true
+    ok "service unit and nginx site removed"
     if command -v certbot >/dev/null 2>&1; then
       local domain; domain=$(get_domain)
       [ -n "$domain" ] && confirm "delete Let's Encrypt cert for ${domain}?" && certbot delete --cert-name "$domain" --non-interactive || true
     fi
     confirm "delete /opt/vpnshop (database + receipts)?" && rm -rf "$APP_DIR" && ok "app directory deleted"
+    ok "uninstall --purge complete — nothing remains"
   else
-    dim "kept: $APP_DIR (use --purge to delete)"
+    dim "kept: ${APP_DIR} (app + data), nginx site, certificates"
+    ok "uninstall complete — data preserved. Full wipe: vpnshop uninstall --purge"
   fi
-  ok "uninstall complete"
+}
+
+# ---------------------------------------------------------------- (re)install in place
+cmd_install() {
+  need_root
+  [ -f "$APP_DIR/INSTALL.sh" ] || { err "INSTALL.sh not found at $APP_DIR — re-run the one-liner:"; echo "  bash <(curl -fsSL https://raw.githubusercontent.com/amir12120/vpnshop/main/cli.sh)"; exit 1; }
+  confirm "run the installer now (existing data in $APP_DIR will be kept)?" || { dim "aborted"; return 0; }
+  cd "$APP_DIR" && bash INSTALL.sh
 }
 
 # ---------------------------------------------------------------- help / menu
@@ -412,8 +433,9 @@ vpnshop — management CLI for VPN Config Shop
   vpnshop ssl remove           revert to plain HTTP
   vpnshop doctor               health check: DB, panels/tunnel reachability, uploads
   vpnshop ports                list all listening ports (tunnel conflict check)
-  vpnshop uninstall [--purge]  remove service & nginx site
-                               --purge also deletes data, receipts, certs
+  vpnshop install              re-run the installer (keeps existing data)
+  vpnshop uninstall            stop service — data, files & config are KEPT
+  vpnshop uninstall --purge    full removal (deletes data, receipts, certs)
   vpnshop help                 this help
 EOF
 }
@@ -421,11 +443,11 @@ cmd_menu() {
   while true; do
     echo ""
     echo -e "${c_info}═══ VPN Shop Manager ═══${c_off}"
-    echo " 1) status        5) backup         9)  ssl manager"
-    echo " 2) restart       6) restore        10) change port"
-    echo " 3) logs          7) update         11) reset admin password"
-    echo " 4) info/help     8) admin user     12) doctor (tunnel/panel check)"
-    echo "                                      13) ports         0) exit  (u = uninstall)"
+    echo " 1) status         5) backup         9)  ssl manager    13) ports"
+    echo " 2) restart        6) restore        10) change port"
+    echo " 3) logs           7) update         11) reset admin password"
+    echo " 4) info/help      8) admin user     12) doctor (tunnel/panel check)"
+    echo " 14) re-install (keeps data)            0) exit  (u = uninstall, data kept)"
     read -rp "choice: " a
     case "$a" in
       1) cmd_status ;;  2) cmd_restart ;; 3) read -rp "lines [50]: " n; cmd_logs "${n:-50}" ;;
@@ -438,6 +460,7 @@ cmd_menu() {
       11) read -rp "username: " u; read -rsp "new password: " p; echo; cmd_admin "$u" "$p" ;;
       12) cmd_doctor ;;
       13) cmd_ports ;;
+      14) cmd_install ;;
       u) cmd_uninstall ;;
       0) break ;;
     esac
@@ -464,6 +487,7 @@ case "${1:-menu}" in
   ssl)      shift || true; cmd_ssl "${1:-menu}" "${2:-}" ;;
   doctor)   cmd_doctor ;;
   ports)    cmd_ports ;;
+  install)  cmd_install ;;
   uninstall) shift || true; cmd_uninstall "$@" ;;
   *) err "unknown command: $1"; usage; exit 1 ;;
 esac

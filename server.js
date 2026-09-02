@@ -83,59 +83,139 @@ const layout = (title, body, user) => `<!doctype html>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${esc(title)} | فروشگاه VPN</title>
 <style>
-:root{--bg:#0f1420;--card:#1a2233;--line:#2a3550;--txt:#e8ecf5;--mut:#8b98b5;--acc:#4f8cff;--ok:#2ecc71;--bad:#e74c3c}
-*{box-sizing:border-box}body{margin:0;font-family:Tahoma,Vazirmatn,sans-serif;background:var(--bg);color:var(--txt);font-size:14px}
-a{color:var(--acc);text-decoration:none}header{display:flex;justify-content:space-between;align-items:center;padding:12px 20px;background:var(--card);border-bottom:1px solid var(--line)}
-header .brand{font-weight:bold;font-size:16px}header nav a{margin-inline-start:16px}
-main{max-width:960px;margin:24px auto;padding:0 16px}
-.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:18px;margin-bottom:16px}
-.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px}
-h1,h2{margin:0 0 14px}h1{font-size:20px}h2{font-size:16px}
-table{width:100%;border-collapse:collapse}th,td{padding:8px 10px;border-bottom:1px solid var(--line);text-align:right}
-th{color:var(--mut);font-weight:normal}
-input,select,textarea{width:100%;padding:9px 11px;background:#0f1420;border:1px solid var(--line);border-radius:8px;color:var(--txt);font-family:inherit;margin:4px 0 12px}
-button,.btn{display:inline-block;padding:9px 18px;background:var(--acc);color:#fff;border:0;border-radius:8px;cursor:pointer;font-family:inherit;font-size:14px}
+:root{
+  --bg:#0b0f1a;--card:#141b2e;--card2:#1a2340;--line:#26304e;
+  --txt:#e9eefb;--mut:#8b98b8;--acc:#4f8cff;--acc2:#7c5cff;--cyan:#35d0d0;
+  --ok:#2ecc71;--bad:#ff5c5c;--gold:#f5b942;
+  --grad:linear-gradient(120deg,#4f8cff,#7c5cff 55%,#35d0d0);
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;font-family:Vazirmatn,Tahoma,'Segoe UI',sans-serif;background:
+  radial-gradient(1200px 500px at 85% -100px,rgba(79,140,255,.14),transparent 60%),
+  radial-gradient(900px 420px at 0% 0%,rgba(124,92,255,.12),transparent 55%),
+  var(--bg);color:var(--txt);font-size:14.5px;line-height:1.7;min-height:100vh}
+a{color:var(--acc);text-decoration:none}
+.wrap{max-width:1060px;margin:0 auto;padding:0 18px}
+header.top{position:sticky;top:0;z-index:50;background:rgba(11,15,26,.8);backdrop-filter:blur(12px);border-bottom:1px solid var(--line)}
+.nav{display:flex;align-items:center;justify-content:space-between;padding:12px 18px}
+.brand{font-size:18px;font-weight:800;letter-spacing:.3px}
+.brand span{background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent}
+header nav a{margin-inline-start:18px;color:var(--txt);font-weight:600;font-size:13.5px;transition:color .15s}
+header nav a:hover{color:var(--acc)}
+main{max-width:1060px;margin:26px auto 40px;padding:0 18px}
+h1{font-size:26px;margin:0 0 16px}h2{font-size:19px;margin:0 0 12px}h3{font-size:15px;margin:0 0 6px}
+.hero{text-align:center;padding:42px 0 24px}
+.hero h1{font-size:33px;line-height:1.45;font-weight:900}
+.hero .grad{background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent}
+.hero p{color:var(--mut);max-width:660px;margin:10px auto 20px;font-size:15px}
+.chips{display:flex;gap:10px;justify-content:center;flex-wrap:wrap}
+.chips span{background:var(--card);border:1px solid var(--line);border-radius:30px;padding:6px 14px;font-size:13px;color:var(--mut)}
+.card{background:linear-gradient(180deg,var(--card2),var(--card));border:1px solid var(--line);border-radius:14px;padding:20px;margin-bottom:16px;transition:transform .18s ease,border-color .18s ease,box-shadow .18s ease}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px}
+.features{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:16px;margin:8px 0 26px}
+.ic{width:46px;height:46px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:22px;background:linear-gradient(135deg,rgba(79,140,255,.22),rgba(124,92,255,.22));border:1px solid var(--line);margin-bottom:12px}
+.features .card p{color:var(--mut);font-size:13px;margin:0}
+.plan{position:relative;display:flex;flex-direction:column;padding:24px 20px}
+.plan:hover{transform:translateY(-4px);border-color:#3b4a7a;box-shadow:0 14px 34px rgba(0,0,0,.45)}
+.plan.popular{border-color:rgba(245,185,66,.55)}
+.plan.popular::before{content:'پرفروش';position:absolute;top:-11px;inset-inline-start:16px;background:var(--gold);color:#241a02;font-size:11px;font-weight:800;border-radius:20px;padding:2px 12px}
+.p-ic{width:52px;height:52px;border-radius:14px;display:flex;align-items:center;justify-content:center;font-size:26px;background:linear-gradient(135deg,#1c2947,#232048);border:1px solid var(--line);margin-bottom:14px}
+.p-feats{margin:8px 0 4px;color:var(--mut);font-size:13.5px}
+.p-feats div{padding:3px 0}
+.p-feats b{color:var(--txt)}
+.price{margin:12px 0 16px;font-size:24px;font-weight:900;background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent}
+.steps .card{text-align:center;padding:22px 14px}
+.steps .n{width:38px;height:38px;margin:0 auto 10px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:800;background:var(--grad);color:#fff}
+.steps .card p{color:var(--mut);font-size:13px;margin:0}
+button,.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:10px 20px;background:var(--grad);color:#fff;border:0;border-radius:10px;cursor:pointer;font-family:inherit;font-size:14px;font-weight:700;transition:filter .15s,transform .1s}
+button:hover,.btn:hover{filter:brightness(1.12)}
+button:active,.btn:active{transform:scale(.98)}
+.btn.sm{padding:7px 14px;font-size:12.5px;border-radius:8px}
+.btn.ghost{background:transparent;border:1px solid var(--line);color:var(--txt)}
+.btn.buy{width:100%;margin-top:auto}
 .btn.secondary{background:transparent;border:1px solid var(--line);color:var(--txt)}
-.btn.ok{background:var(--ok)}.btn.bad{background:var(--bad)}
-.badge{padding:3px 10px;border-radius:20px;font-size:12px}
-.b-pending{background:#3a3320;color:#f1c40f}.b-review{background:#1e3a5f;color:#5dade2}
-.b-approved,.b-delivered{background:#1e4620;color:#2ecc71}.b-rejected,.b-failed{background:#4a1f1f;color:#e74c3c}
-label{color:var(--mut);font-size:12px;display:block}
-.msg{padding:10px 14px;border-radius:8px;margin-bottom:14px}
-.msg.ok{background:#1e4620;color:#a9dfbf}.msg.err{background:#4a1f1f;color:#f2b3b3}
-.price{font-size:18px;font-weight:bold;color:var(--acc)}
-.mut{color:var(--mut);font-size:12px}
-code,.mono{direction:ltr;text-align:left;font-family:monospace;font-size:12px;word-break:break-all;background:#0f1420;padding:6px 10px;border-radius:6px;display:block}
-img.qr{background:#fff;padding:8px;border-radius:8px}
+.btn.ok{background:linear-gradient(120deg,#1f9d55,#2ecc71)}
+.btn.bad{background:linear-gradient(120deg,#d64545,#ff5c5c)}
+input,select,textarea{width:100%;padding:11px 13px;background:#0d1322;border:1px solid var(--line);border-radius:10px;color:var(--txt);font-family:inherit;font-size:14px;margin:5px 0 14px;outline:none;transition:border-color .15s}
+input:focus,select:focus,textarea:focus{border-color:var(--acc)}
+label{color:var(--mut);font-size:12.5px;display:block;font-weight:600}
+table{width:100%;border-collapse:collapse}
+th,td{padding:10px 12px;border-bottom:1px solid var(--line);text-align:right;font-size:13.5px}
+th{color:var(--mut);font-weight:600;font-size:12.5px}
+tr:hover td{background:rgba(79,140,255,.05)}
+.badge{padding:4px 12px;border-radius:30px;font-size:12px;font-weight:700;white-space:nowrap}
+.b-pending_payment,.b-awaiting_review{background:#3a3320;color:#f5c542}
+.b-provisioning{background:#23395f;color:#7db2ff}
+.b-approved,.b-delivered{background:#14432a;color:#45e08a}
+.b-rejected,.b-failed{background:#4a1f22;color:#ff8a8a}
+.msg{padding:12px 16px;border-radius:10px;margin-bottom:16px;font-size:13.5px;border:1px solid transparent}
+.msg.ok{background:rgba(46,204,113,.12);border-color:rgba(46,204,113,.35);color:#8fe8b8}
+.msg.err{background:rgba(255,92,92,.12);border-color:rgba(255,92,92,.35);color:#ffb3b3}
+.mut{color:var(--mut);font-size:12.5px}
+code,.mono{direction:ltr;text-align:left;font-family:'Cascadia Code',Consolas,monospace;font-size:12.5px;word-break:break-all;background:#0b111f;padding:9px 12px;border-radius:8px;display:block;border:1px solid var(--line);margin:4px 0 10px}
+img.qr{background:#fff;padding:8px;border-radius:10px}
 .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+footer.foot{border-top:1px solid var(--line);padding:22px 0 30px;margin-top:40px;text-align:center;color:var(--mut);font-size:12.5px}
+@media(max-width:640px){.hero h1{font-size:25px}.nav{flex-direction:column;gap:10px}}
 </style>
 </head>
 <body>
-<header>
-  <div class="brand">🛒 فروشگاه VPN</div>
-  <nav>
-    ${user ? `<a href="/">پلن‌ها</a><a href="/orders">سفارش‌های من</a>${user.role === 'admin' ? '<a href="/admin">پنل مدیریت</a>' : ''}<a href="/logout">خروج (${esc(user.username)})</a>` : `<a href="/login">ورود</a><a href="/register">عضویت</a>`}
-  </nav>
+<header class="top">
+  <div class="wrap nav">
+    <a class="brand" href="/">🛒 VPN<span>Shop</span></a>
+    <nav>
+      ${user ? `<a href="/">پلن‌ها</a><a href="/orders">سفارش‌های من</a>${user.role === 'admin' ? '<a href="/admin">پنل مدیریت</a>' : ''}<a href="/logout" class="btn ghost sm">خروج (${esc(user.username)})</a>` : `<a href="/login">ورود</a><a href="/register" class="btn sm">عضویت</a>`}
+    </nav>
+  </div>
 </header>
 <main>${body}</main>
+<footer class="foot"><div class="wrap">🛒 فروشگاه VPN — پرداخت کارت به کارت · تحویل خودکار کانفیگ و لینک اشتراک</div></footer>
 </body></html>`;
 
 // ---------------------------------------------------------------- PUBLIC: plans & register/login
 route('GET', '/', async (req, res, { user }) => {
   const plans = db.prepare('SELECT * FROM plans WHERE active = 1 ORDER BY sort, id').all();
   const body = `
-  <h1>بسته‌های اینترنتی</h1>
-  <div class="grid">
-  ${plans.map((p) => `
-    <div class="card">
-      <h2>${esc(p.name)}</h2>
-      <div class="mut">حجم: ${p.volume_gb == null ? 'نامحدود' : p.volume_gb + ' گیگابایت'}</div>
-      <div class="mut">زمان: ${p.duration_days == null ? 'نامحدود' : p.duration_days + ' روز'}</div>
-      <div class="mut">تعداد دستگاه: ${p.device_limit ?? 2}</div>
-      <div class="price">${fmtToman(p.price_toman)} تومان</div>
-      <a class="btn" href="/buy/${p.id}">خرید (کارت به کارت)</a>
-    </div>`).join('') || '<p>هنوز پلنی تعریف نشده است.</p>'}
-  </div>`;
+  <section class="hero">
+    <h1>اینترنت پرسرعت، <span class="grad">فقط با چند کلیک</span></h1>
+    <p>خرید آنلاین کانفیگ VPN با پرداخت کارت به کارت؛ فیش واریزی را بارگذاری کنید و پس از تأیید مدیر، کانفیگ همراه با QR و لینک اشتراک تحویل بگیرید.</p>
+    <div class="chips"><span>⚡ تحویل خودکار</span><span>🛡 امن و پایدار</span><span>📱 همه دستگاه‌ها</span><span>💳 کارت به کارت</span></div>
+  </section>
+
+  <section class="features">
+    <div class="card"><div class="ic">💳</div><h3>پرداخت کارت به کارت</h3><p>مبلغ بسته را به کارت فروشگاه واریز و تصویر فیش را در سایت بارگذاری کنید.</p></div>
+    <div class="card"><div class="ic">⚡</div><h3>تحویل خودکار</h3><p>بعد از تأیید مدیر، کاربر روی پنل سنایی ساخته و کانفیگ به‌صورت خودکار تحویل می‌شود.</p></div>
+    <div class="card"><div class="ic">📲</div><h3>QR و لینک اشتراک</h3><p>با اسکن QR یا لینک اشتراک، روی هر اپ و هر دستگاهی وصل شوید.</p></div>
+  </section>
+
+  <section class="plans">
+    <h2>بسته‌های اینترنتی</h2>
+    <div class="grid">
+    ${plans.map((p, idx) => `
+      <div class="card plan${idx === 1 ? ' popular' : ''}">
+        <div class="p-ic">📶</div>
+        <h2>${esc(p.name)}</h2>
+        <div class="p-feats">
+          <div>حجم: <b>${p.volume_gb == null ? 'نامحدود' : p.volume_gb + ' گیگابایت'}</b></div>
+          <div>زمان: <b>${p.duration_days == null ? 'نامحدود' : p.duration_days + ' روز'}</b></div>
+          <div>تعداد دستگاه: <b>${p.device_limit ?? 2}</b></div>
+        </div>
+        <div class="price">${fmtToman(p.price_toman)} تومان</div>
+        <a class="btn buy" href="/buy/${p.id}">خرید (کارت به کارت)</a>
+      </div>`).join('') || '<p class="mut">هنوز پلنی تعریف نشده است — به‌زودی.</p>'}
+    </div>
+  </section>
+
+  <section class="steps">
+    <h2>نحوه خرید</h2>
+    <div class="grid">
+      <div class="card"><div class="n">۱</div><h3>انتخاب بسته</h3><p>بسته متناسب با حجم و زمان دلخواه را انتخاب کنید.</p></div>
+      <div class="card"><div class="n">۲</div><h3>واریز و ارسال فیش</h3><p>مبلغ را کارت به کارت کنید و تصویر فیش را در سایت بارگذاری کنید.</p></div>
+      <div class="card"><div class="n">۳</div><h3>تأیید مدیر</h3><p>پس از بررسی فیش، سفارش شما تأیید و کانفیگ ساخته می‌شود.</p></div>
+      <div class="card"><div class="n">۴</div><h3>تحویل کانفیگ</h3><p>QR، لینک اشتراک و لینک کانفیگ‌ها را دریافت و وصل شوید.</p></div>
+    </div>
+  </section>`;
   send(res, 200, layout('فروشگاه', body, user));
 });
 
