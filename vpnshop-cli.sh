@@ -9,7 +9,7 @@
 # ============================================================
 set -euo pipefail
 
-VERSION="1.1.0"
+VERSION="1.2.0"
 APP_DIR="${VPN_SHOP_APP_DIR:-/opt/vpnshop}"
 SERVICE="vpnshop"
 NGINX_SITE="/etc/nginx/sites-available/vpnshop"

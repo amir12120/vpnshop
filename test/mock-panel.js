@@ -1,20 +1,38 @@
 'use strict';
 // Mock Sanayi (3x-ui) panel for testing the shop without a real panel.
-// Implements: POST /login, GET /panel/api/inbounds/list, POST /panel/api/inbounds/addClient
+// v2 API:  POST /login (cookie), GET /panel/api/inbounds/list, POST /panel/api/inbounds/addClient
+// v3 API:  Authorization: Bearer <apiToken>, POST /panel/api/clients/add (JSON),
+//          GET /panel/api/clients/subLinks/:subId, GET /panel/api/clients/links/:email
 const http = require('http');
 
-const INBOUND = {
-  id: 1, port: 443, protocol: 'vless', remark: 'main-inbound',
-  listen: '', // '' = all interfaces
-  settings: JSON.stringify({ clients: [] }),
-  streamSettings: JSON.stringify({
-    network: 'ws', security: 'tls',
-    wsSettings: { path: '/wspath', settings: { headers: { Host: 'panel.example.com' } } },
-    tlsSettings: { serverName: 'panel.example.com', settings: { allowInsecure: false } },
-  }),
-};
+const API_TOKEN = 'mock-api-token-123';
+const clientsBySub = {};   // subId -> { email, uuid }
+
+function freshInbound() {
+  return {
+    id: 1, port: 443, protocol: 'vless', remark: 'main-inbound',
+    listen: '', // '' = all interfaces
+    settings: JSON.stringify({ clients: [] }),
+    streamSettings: JSON.stringify({
+      network: 'ws', security: 'tls',
+      wsSettings: { path: '/wspath', settings: { headers: { Host: 'panel.example.com' } } },
+      tlsSettings: { serverName: 'panel.example.com', settings: { allowInsecure: false } },
+    }),
+  };
+}
+let INBOUND = freshInbound();
 
 const sessions = new Set();
+
+function authed(req) {
+  if (req.headers.authorization === `Bearer ${API_TOKEN}`) return true;
+  return [...sessions].some((s) => (req.headers.cookie || '').includes(s));
+}
+function sendJSON(res, code, obj) {
+  res.statusCode = code;
+  res.setHeader('Content-Type', 'application/json');
+  res.end(JSON.stringify(obj));
+}
 
 const server = http.createServer((req, res) => {
   const u = new URL(req.url, 'http://localhost');
@@ -22,6 +40,8 @@ const server = http.createServer((req, res) => {
   req.on('data', (c) => (body += c));
   req.on('end', () => {
     const params = new URLSearchParams(body);
+    let jbody = null;
+    try { jbody = JSON.parse(body); } catch { /* ignore */ }
 
     if (u.pathname === '/login' && req.method === 'POST') {
       if (params.get('username') === 'admin' && params.get('password') === 'panel123') {
@@ -30,29 +50,54 @@ const server = http.createServer((req, res) => {
         res.setHeader('Set-Cookie', `3x-ui=${sid}; Path=/`);
         return res.end(JSON.stringify({ success: true, msg: 'login ok', obj: null }));
       }
-      res.statusCode = 401;
-      return res.end(JSON.stringify({ success: false, msg: 'bad credentials' }));
+      return sendJSON(res, 401, { success: false, msg: 'bad credentials' });
     }
 
-    if (u.pathname === '/panel/api/inbounds/list') {
-      if (![...sessions].some((s) => (req.headers.cookie || '').includes(s))) {
-        res.statusCode = 401;
-        return res.end(JSON.stringify({ success: false }));
+    if (!authed(req)) {
+      return sendJSON(res, 401, { success: false, msg: 'unauthorized' });
+    }
+
+    // ---------- v3 ----------
+    if (u.pathname === '/panel/api/clients/add' && req.method === 'POST') {
+      const { client, inboundIds = [] } = jbody || {};
+      if (!client || !inboundIds.includes(INBOUND.id)) {
+        return sendJSON(res, 400, { success: false, msg: 'client/inboundIds required' });
       }
+      const c = { ...client };
+      clientsBySub[c.subId || c.email] = c;
+      INBOUND.settings = JSON.stringify({
+        clients: [...JSON.parse(INBOUND.settings).clients, c],
+      });
+      return sendJSON(res, 200, { success: true, msg: 'client added', obj: null });
+    }
+    if (u.pathname.startsWith('/panel/api/clients/subLinks/')) {
+      const subId = decodeURIComponent(u.pathname.split('/').pop());
+      const c = clientsBySub[subId];
+      if (!c) return sendJSON(res, 404, { success: false, msg: 'not found' });
+      return sendJSON(res, 200, { success: true, msg: '', obj: [`http://127.0.0.1:2053/sub/${subId}`] });
+    }
+    if (u.pathname.startsWith('/panel/api/clients/links/')) {
+      const email = decodeURIComponent(u.pathname.split('/').pop());
+      const c = Object.values(clientsBySub).find((x) => x.email === email);
+      if (!c) return sendJSON(res, 404, { success: false, msg: 'not found' });
+      return sendJSON(res, 200, {
+        success: true, msg: '',
+        obj: [`vless://${c.id}@127.0.0.1:443?type=ws&security=tls&path=%2Fwspath#main-inbound`],
+      });
+    }
+
+    // ---------- v2 (fallback path) ----------
+    if (u.pathname === '/panel/api/inbounds/list') {
       return res.end(JSON.stringify({ success: true, msg: '', obj: [INBOUND] }));
     }
-
     if (u.pathname === '/panel/api/inbounds/addClient' && req.method === 'POST') {
-      if (![...sessions].some((s) => (req.headers.cookie || '').includes(s))) {
-        res.statusCode = 401;
-        return res.end(JSON.stringify({ success: false }));
-      }
       const inboundId = params.get('id');
       if (String(inboundId) !== String(INBOUND.id)) {
         return res.end(JSON.stringify({ success: false, msg: 'inbound not found' }));
       }
       const settings = JSON.parse(params.get('settings') || '{}');
       for (const c of settings.clients || []) {
+        clientsBySub[c.subId || c.email] = c;
         INBOUND.settings = JSON.stringify({
           clients: [...JSON.parse(INBOUND.settings).clients, c],
         });
@@ -66,8 +111,7 @@ const server = http.createServer((req, res) => {
       return res.end('vless://mock-subscription-content\n');
     }
 
-    res.statusCode = 404;
-    res.end(JSON.stringify({ success: false, msg: 'not found' }));
+    sendJSON(res, 404, { success: false, msg: 'not found' });
   });
 });
 

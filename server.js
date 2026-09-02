@@ -414,7 +414,7 @@ async function provisionOrder(order, panelId, inboundId) {
   const plan = db.prepare('SELECT * FROM plans WHERE id = ?').get(order.plan_id);
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(order.user_id);
 
-  const client = new SanayiClient({ baseUrl: panel.base_url, username: panel.username, password: panel.password });
+  const client = new SanayiClient({ baseUrl: panel.base_url, username: panel.username, password: panel.password, apiToken: panel.api_token, subUrl: panel.sub_url });
   const email = `u${user.id}o${order.id}_${randomToken(4)}`;
   const uuid = crypto.randomUUID();
   const totalGB = plan.volume_gb == null ? 0 : Math.round(plan.volume_gb * 1024 * 1024 * 1024);
@@ -530,10 +530,14 @@ route('GET', '/admin/panels', async (req, res, ctx) => {
     <form method="post" action="/admin/panels/${p.id}">
       <div class="row">
         <div style="flex:1"><label>نام</label><input name="name" value="${esc(p.name)}"></div>
-        <div style="flex:2"><label>آدرس پنل (Base URL)</label><input name="base_url" value="${esc(p.base_url)}" dir="ltr"></div>
+        <div style="flex:2"><label>آدرس پنل (Base URL — از طریق تونل: http://127.0.0.1:PORT)</label><input name="base_url" value="${esc(p.base_url)}" dir="ltr"></div>
+        <div style="flex:1"><label>API Token (v3، اختیاری)</label><input name="api_token" value="${esc(p.api_token || '')}" dir="ltr" placeholder="توکن ساخته‌شده در پنل"></div>
         <div style="flex:1"><label>نام کاربری</label><input name="username" value="${esc(p.username)}" dir="ltr"></div>
         <div style="flex:1"><label>رمز عبور</label><input name="password" type="password" placeholder="(تغییر ندهید = بدون تغییر)" dir="ltr"></div>
         <div style="flex:1"><label>Inbound پیش‌فرض</label><input name="default_inbound_id" value="${p.default_inbound_id ?? ''}"></div>
+      </div>
+      <div class="row">
+        <div style="flex:3"><label>آدرس عمومی لینک اشتراک (sub) — برای مشتری‌ها</label><input name="sub_url" value="${esc(p.sub_url || '')}" dir="ltr" placeholder="مثل https://Domain:Port (خالی = آدرس پنل)"></div>
       </div>
       <div class="row">
         <button>ذخیره</button>
@@ -549,9 +553,13 @@ route('GET', '/admin/panels', async (req, res, ctx) => {
       <div class="row">
         <div style="flex:1"><label>نام</label><input name="name" required placeholder="مثلاً سرور خارج"></div>
         <div style="flex:2"><label>آدرس پنل (از طریق تونل: http://127.0.0.1:PORT)</label><input name="base_url" required dir="ltr" placeholder="http://127.0.0.1:2053"></div>
+        <div style="flex:1"><label>API Token (v3، اختیاری)</label><input name="api_token" dir="ltr" placeholder="توکن ساخته‌شده در پنل (توصیه می‌شود)"></div>
         <div style="flex:1"><label>نام کاربری مدیر پنل</label><input name="username" required dir="ltr"></div>
         <div style="flex:1"><label>رمز عبور مدیر پنل</label><input name="password" required type="password" dir="ltr"></div>
         <div style="flex:1"><label>Inbound پیش‌فرض</label><input name="default_inbound_id" placeholder="مثلاً ۱"></div>
+      </div>
+      <div class="row">
+        <div style="flex:3"><label>آدرس عمومی لینک اشتراک (sub) — برای مشتری‌ها</label><input name="sub_url" dir="ltr" placeholder="مثل https://Domain:Port (خالی = آدرس پنل)"></div>
       </div>
       <button>افزودن پنل</button>
     </form>
@@ -565,7 +573,9 @@ async function panelFromForm(req, { requirePassword = true } = {}) {
   const p = {
     name: (b.get('name') || '').trim(),
     base_url: (b.get('base_url') || '').trim().replace(/\/+$/, ''),
+    api_token: (b.get('api_token') || '').trim(),
     username: (b.get('username') || '').trim(),
+    sub_url: (b.get('sub_url') || '').trim().replace(/\/+$/, '') || null,
     default_inbound_id: b.get('default_inbound_id') ? Number(b.get('default_inbound_id')) : null,
   };
   const pw = b.get('password') || '';
@@ -579,8 +589,8 @@ route('POST', '/admin/panels/new', async (req, res, ctx) => {
   if (!requireAdmin(ctx)) return;
   try {
     const p = await panelFromForm(req);
-    db.prepare('INSERT INTO panels (name, base_url, username, password, default_inbound_id) VALUES (?,?,?,?,?)')
-      .run(p.name, p.base_url, p.username, p.password, p.default_inbound_id);
+    db.prepare('INSERT INTO panels (name, base_url, username, password, api_token, sub_url, default_inbound_id) VALUES (?,?,?,?,?,?,?)')
+      .run(p.name, p.base_url, p.username, p.password, p.api_token || null, p.sub_url, p.default_inbound_id);
   } catch (e) { return redirect(res, '/admin/panels?err=' + encodeURIComponent(e.message)); }
   redirect(res, '/admin/panels');
 });
@@ -589,12 +599,13 @@ route('POST', '/admin/panels/:id', async (req, res, ctx) => {
   if (!requireAdmin(ctx)) return;
   try {
     const p = await panelFromForm(req, { requirePassword: false });
+    const base = 'UPDATE panels SET name=?, base_url=?, username=?, api_token=?, sub_url=?, default_inbound_id=?';
     if (p.password) {
-      db.prepare('UPDATE panels SET name=?, base_url=?, username=?, password=?, default_inbound_id=? WHERE id=?')
-        .run(p.name, p.base_url, p.username, p.password, p.default_inbound_id, ctx.params.id);
+      db.prepare(base + ', password=? WHERE id=?')
+        .run(p.name, p.base_url, p.username, p.api_token || null, p.sub_url, p.default_inbound_id, p.password, ctx.params.id);
     } else {
-      db.prepare('UPDATE panels SET name=?, base_url=?, username=?, default_inbound_id=? WHERE id=?')
-        .run(p.name, p.base_url, p.username, p.default_inbound_id, ctx.params.id);
+      db.prepare(base + ' WHERE id=?')
+        .run(p.name, p.base_url, p.username, p.api_token || null, p.sub_url, p.default_inbound_id, ctx.params.id);
     }
   } catch (e) { return redirect(res, '/admin/panels?err=' + encodeURIComponent(e.message)); }
   redirect(res, '/admin/panels');
@@ -604,7 +615,7 @@ route('POST', '/admin/panels/:id/test', async (req, res, ctx) => {
   if (!requireAdmin(ctx)) return;
   const panel = db.prepare('SELECT * FROM panels WHERE id = ?').get(ctx.params.id);
   if (!panel) return redirect(res, '/admin/panels');
-  const client = new SanayiClient({ baseUrl: panel.base_url, username: panel.username, password: panel.password });
+  const client = new SanayiClient({ baseUrl: panel.base_url, username: panel.username, password: panel.password, apiToken: panel.api_token });
   const result = await client.testConnection();
   db.prepare('UPDATE panels SET last_test_ok=?, last_test_at=datetime(\'now\'), last_test_message=? WHERE id=?')
     .run(result.ok ? 1 : 0, result.message + (result.ok && result.inbounds.length ? ` — inboundها: ${result.inbounds.map((i) => `#${i.id} (${i.tag}:${i.port})`).join(', ')}` : ''), panel.id);
