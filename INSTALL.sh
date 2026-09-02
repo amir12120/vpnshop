@@ -19,7 +19,12 @@ REPO_URL="${VPN_SHOP_REPO:-https://github.com/amir12120/vpnshop.git}"
 BRANCH="${VPN_SHOP_BRANCH:-main}"
 
 # ---------- bootstrap: clone the repo if we're not inside a checkout ----------
-if [ ! -f server.js ]; then
+# The guard checks the SCRIPT's own directory (not the cwd): when run via
+# `bash <(curl ... cli.sh) install` or `bash /tmp/INSTALL.sh`, the script sits
+# somewhere without server.js and must fetch the repo; inside a checkout the
+# whole tree (including scripts/preflight.sh) is already next to it.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ ! -f "$SCRIPT_DIR/server.js" ]; then
   if [ "$(id -u)" -ne 0 ]; then
     echo "!! Please run as root:  sudo bash INSTALL.sh"
     exit 1
