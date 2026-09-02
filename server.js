@@ -391,8 +391,8 @@ route('GET', '/admin/orders', async (req, res, ctx) => {
         <select name="panel_id">
           ${db.prepare('SELECT * FROM panels ORDER BY id').all().map((p) => `<option value="${p.id}">${esc(p.name)}${p.default_inbound_id ? ` (inbound ${p.default_inbound_id})` : ''}</option>`).join('') || '<option value="">— هیچ پنلی ثبت نشده —</option>'}
         </select>
-        <label>Inbound ID (خالی = پیش‌فرض پنل)</label>
-        <input name="inbound_id" placeholder="مثلاً ۱">
+        <label>Inboundها (با ویرگول جدا کنید؛ خالی = پیش‌فرض پنل/پلن)</label>
+        <input name="inbound_ids" placeholder="مثلاً 1,2,3 — چند اینباند مجاز است">
       </div>
       <div><button class="ok">✓ تأیید و تحویل خودکار</button></div>
     </form>
@@ -404,15 +404,24 @@ route('GET', '/admin/orders', async (req, res, ctx) => {
   send(res, 200, layout('سفارش‌ها', body, user));
 });
 
-// create client on Sanayi panel + store delivery
-async function provisionOrder(order, panelId, inboundId) {
+// resolve inbound ids: form value (comma/space separated) > plan default > panel default
+function resolveInboundIds(raw, plan, panel) {
+  const parse = (s) => String(s || '').split(/[,،\s]+/).map(Number).filter(Boolean);
+  const fromRaw = parse(raw);
+  if (fromRaw.length) return fromRaw;
+  if (plan && parse(plan.inbound_id).length) return parse(plan.inbound_id);
+  if (panel && panel.default_inbound_id) return [Number(panel.default_inbound_id)];
+  return [];
+}
+
+// create client on Sanayi panel + store delivery (one or more inbounds)
+async function provisionOrder(order, panelId, inboundIdsRaw) {
   const panel = db.prepare('SELECT * FROM panels WHERE id = ?').get(panelId);
   if (!panel) throw new Error('پنل انتخاب نشده است');
-  const inbound = inboundId ? Number(inboundId) : panel.default_inbound_id;
-  if (!inbound) throw new Error('Inbound مشخص نشده است (نه در فرم نه به‌عنوان پیش‌فرض پنل)');
-
   const plan = db.prepare('SELECT * FROM plans WHERE id = ?').get(order.plan_id);
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(order.user_id);
+  const inbounds = resolveInboundIds(inboundIdsRaw, plan, panel);
+  if (!inbounds.length) throw new Error('Inbound مشخص نشده است (در فرم بنویسید، مثلاً 1,2,3)');
 
   const client = new SanayiClient({ baseUrl: panel.base_url, username: panel.username, password: panel.password, apiToken: panel.api_token, subUrl: panel.sub_url });
   const email = `u${user.id}o${order.id}_${randomToken(4)}`;
@@ -420,8 +429,8 @@ async function provisionOrder(order, panelId, inboundId) {
   const totalGB = plan.volume_gb == null ? 0 : Math.round(plan.volume_gb * 1024 * 1024 * 1024);
   const expiryTime = plan.duration_days == null ? 0 : Date.now() + plan.duration_days * 24 * 3600 * 1000;
 
-  await client.addClient({ inboundId: inbound, email, uuid, totalGB, expiryTime, limitIp: plan.device_limit ?? 2 });
-  const links = await client.getClientLinks({ inboundId: inbound, email });
+  await client.addClient({ inboundIds: inbounds, email, uuid, totalGB, expiryTime, limitIp: plan.device_limit ?? 2 });
+  const links = await client.getClientLinks({ inboundIds: inbounds, email });
 
   db.prepare(`INSERT INTO deliveries (order_id, panel_id, sub_url, config_json, qr_data_url)
               VALUES (?, ?, ?, ?, ?)`).run(
@@ -437,7 +446,7 @@ route('POST', '/admin/orders/:id/approve', async (req, res, ctx) => {
   const b = new URLSearchParams((await readBody(req)).toString());
   db.prepare("UPDATE orders SET status='provisioning' WHERE id=?").run(order.id);
   try {
-    await provisionOrder(order, b.get('panel_id'), b.get('inbound_id'));
+    await provisionOrder(order, b.get('panel_id'), b.get('inbound_ids'));
   } catch (e) {
     db.prepare("UPDATE orders SET status='awaiting_review', admin_note=? WHERE id=?").run('خطا در ساخت: ' + e.message, order.id);
     return redirect(res, '/admin/orders?err=' + encodeURIComponent('خطا در اتصال به پنل: ' + e.message));

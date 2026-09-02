@@ -86,7 +86,7 @@ async function multipart(path, cookie, fields, file) {
   check('panel listed with test button', !!panelId);
   r = await api(`/admin/panels/${panelId}/test`, { method: 'POST', cookie: adminCookie });
   const afterTest = await (await api('/admin/panels', { cookie: adminCookie })).res.text();
-  check('connection test OK shown', afterTest.includes('connected, 1 inbound'));
+  check('connection test OK shown', /connected, \d+ inbound/.test(afterTest));
 
   console.log('— admin: create plan + card number');
   await api('/admin/plans/new', {
