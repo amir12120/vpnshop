@@ -357,7 +357,15 @@ cmd_doctor() {
 }
 cmd_ports() {
   echo -e "${c_info}── Listening ports ──${c_off}"
-  if command -v ss >/dev/null 2>&1; then ss -tlnp | sed 's/^/ /'; else netstat -tlnp | sed 's/^/ /'; fi
+  if command -v ss >/dev/null 2>&1; then
+    ss -tlnp | sed 's/^/ /'
+  elif netstat -tlnp >/dev/null 2>&1; then
+    netstat -tlnp | sed 's/^/ /'
+  elif command -v netstat >/dev/null 2>&1; then
+    netstat -an | grep -i listen | sed 's/^/ /'
+  else
+    dim "no ss/netstat found — can't list ports"
+  fi
   echo ""
   dim " shop port: $(get_port) | shop must NOT share a port with tunnel listeners"
 }
@@ -489,5 +497,6 @@ case "${1:-menu}" in
   ports)    cmd_ports ;;
   install)  cmd_install ;;
   uninstall) shift || true; cmd_uninstall "$@" ;;
+  menu|"")  cmd_menu ;;   # `vpnshop` alone opens the interactive menu
   *) err "unknown command: $1"; usage; exit 1 ;;
 esac
