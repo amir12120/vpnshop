@@ -44,7 +44,7 @@ const info = (m) => console.log(`  ➜ ${m}`);
     info('no Sanayi panels configured yet (add them in /admin/panels)');
   }
   for (const p of panels) {
-    const client = new SanayiClient({ baseUrl: p.base_url, username: p.username, password: p.password, timeoutMs: 6000 });
+    const client = new SanayiClient({ baseUrl: p.base_url, username: p.username, password: p.password, apiToken: p.api_token, timeoutMs: 6000 });
     const r = await client.testConnection();
     if (r.ok) {
       ok(`panel "${p.name}" (${p.base_url}) reachable — ${r.message}`);

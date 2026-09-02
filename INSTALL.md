@@ -60,14 +60,26 @@ Open `https://DOMAIN` (or `http://IP:3000`) in a browser — you should see the 
 
 ## 4. Post-install configuration (admin panel)
 
+Panels page (`/admin/panels`) — each panel row takes:
+
+- **Base URL** — the tunnel address, e.g. `http://127.0.0.1:PORT`.
+- **API Token** (optional, recommended) — create a token in the panel under
+  **API Tokens** (3x-ui v3). The shop sends `Authorization: Bearer <token>`.
+  Leave empty to use username/password cookie login (v2 panels).
+- **Username / Password** — panel admin credentials (v2 fallback).
+- **Public sub URL** — the address customers reach the subscription at, e.g.
+  `https://Domain:Port`. Required when the Base URL is a local tunnel address;
+  leave empty only when the Base URL is already public.
+- **Default inbound** — the inbound ID clients are added to.
+
+Click **Test Connection** to verify auth + reachability before saving.
+
+## 4b. Delivery contents
+
 Log in at `/admin` with the credentials you set.
 
 1. **Shop settings** → deposit card number + holder name.
-2. **Sanayi panels** → add a panel:
-   - **Name**: any label.
-   - **Base URL**: if the panel is reachable via tunnel, use the tunnel address, e.g. `http://127.0.0.1:PORT` (a local forward of the foreign panel). Never expose the panel publicly.
-   - **Username / password**: panel admin credentials.
-   - **Default inbound**: pre-selects the inbound; leave empty if unsure.
+2. **Sanayi panels** → add a panel (see the field list in section 4 above — use an **API token** for v3 panels, or panel username/password for v2; set the **public sub URL** so subscription links work for customers).
 3. Click **“Test connection”** — success shows `connected, N inbound(s)`, failure explains the error.
 4. **Plans** → create plans with volume (GB), duration (days), price (Toman), device limit.
 
