@@ -646,19 +646,18 @@ route('GET', '/admin/panels', async (req, res, ctx) => {
   const panels = db.prepare('SELECT * FROM panels ORDER BY id').all();
   const body = `
   <h1>پنل‌های سنایی</h1>
+  ${ctx.query.err ? `<div class="msg err">⚠ ${esc(ctx.query.err)}</div>` : ''}
   ${panels.map((p) => `
   <div class="card">
     <form method="post" action="/admin/panels/${p.id}">
       <div class="row">
         <div style="flex:1"><label>نام</label><input name="name" value="${esc(p.name)}"></div>
         <div style="flex:2"><label>آدرس پنل (Base URL — از طریق تونل: http://127.0.0.1:PORT)</label><input name="base_url" value="${esc(p.base_url)}" dir="ltr"></div>
-        <div style="flex:1"><label>API Token (v3، اختیاری)</label><input name="api_token" value="${esc(p.api_token || '')}" dir="ltr" placeholder="توکن ساخته‌شده در پنل"></div>
-        <div style="flex:1"><label>نام کاربری</label><input name="username" value="${esc(p.username)}" dir="ltr"></div>
-        <div style="flex:1"><label>رمز عبور</label><input name="password" type="password" placeholder="(تغییر ندهید = بدون تغییر)" dir="ltr"></div>
+        <div style="flex:1"><label>API Token (پنل سنایی → تنظیمات → API Tokens)</label><input name="api_token" value="${esc(p.api_token || '')}" dir="ltr" placeholder="توکن — برای v3 الزامی است"></div>
         <div style="flex:1"><label>Inbound پیش‌فرض</label><input name="default_inbound_id" value="${p.default_inbound_id ?? ''}"></div>
       </div>
       <div class="row">
-        <div style="flex:3"><label>آدرس عمومی لینک اشتراک (sub) — برای مشتری‌ها</label><input name="sub_url" value="${esc(p.sub_url || '')}" dir="ltr" placeholder="مثل https://Domain:Port (خالی = آدرس پنل)"></div>
+        <div style="flex:3"><label>آدرس عمومی لینک اشتراک (sub) — برای مشتری‌ها</label><input name="sub_url" value="${esc(p.sub_url || '')}" dir="ltr" placeholder="مثل https://Domain:2096/amirr/ (با همان مسیر پیکربندی‌شده در پنل)"></div>
       </div>
       <div class="row">
         <button>ذخیره</button>
@@ -673,36 +672,30 @@ route('GET', '/admin/panels', async (req, res, ctx) => {
     <form method="post" action="/admin/panels/new">
       <div class="row">
         <div style="flex:1"><label>نام</label><input name="name" required placeholder="مثلاً سرور خارج"></div>
-        <div style="flex:2"><label>آدرس پنل (از طریق تونل: http://127.0.0.1:PORT)</label><input name="base_url" required dir="ltr" placeholder="http://127.0.0.1:2053"></div>
-        <div style="flex:1"><label>API Token (v3، اختیاری)</label><input name="api_token" dir="ltr" placeholder="توکن ساخته‌شده در پنل (توصیه می‌شود)"></div>
-        <div style="flex:1"><label>نام کاربری مدیر پنل</label><input name="username" required dir="ltr"></div>
-        <div style="flex:1"><label>رمز عبور مدیر پنل</label><input name="password" required type="password" dir="ltr"></div>
-        <div style="flex:1"><label>Inbound پیش‌فرض</label><input name="default_inbound_id" placeholder="مثلاً ۱"></div>
+        <div style="flex:2"><label>آدرس پنل (از طریق تونل: http://127.0.0.1:PORT)</label><input name="base_url" required dir="ltr" placeholder="http://127.0.0.1:2053 یا https://panel.domain:2083/amir"></div>
+        <div style="flex:2"><label>API Token (پنل سنایی → تنظیمات → API Tokens)</label><input name="api_token" dir="ltr" placeholder="توکن — برای v3 الزامی است"></div>
+        <div style="flex:1"><label>Inbound پیش‌فرض</label><input name="default_inbound_id" placeholder="مثلاً ۲"></div>
       </div>
       <div class="row">
-        <div style="flex:3"><label>آدرس عمومی لینک اشتراک (sub) — برای مشتری‌ها</label><input name="sub_url" dir="ltr" placeholder="مثل https://Domain:Port (خالی = آدرس پنل)"></div>
+        <div style="flex:3"><label>آدرس عمومی لینک اشتراک (sub) — برای مشتری‌ها</label><input name="sub_url" dir="ltr" placeholder="مثل https://Domain:2096/amirr/ (خالی = آدرس پنل)"></div>
       </div>
       <button>افزودن پنل</button>
     </form>
   </div>
-  <p class="mut">نکته: اگر پنل سنایی فقط از طریق تونل در دسترس است، آدرس را به شکل <span class="mono" style="display:inline">http://127.0.0.1:PORT</span> وارد کنید (پورتِ فورواردشده روی همین سرور).</p>`;
+  <p class="mut">نکته ۱: اتصال با API Token انجام می‌شود — نام کاربری و رمز مدیر پنل دیگر لازم نیست. نکته ۲: اگر پنل سنایی فقط از طریق تونل در دسترس است، آدرس را به شکل <span class="mono" style="display:inline">http://127.0.0.1:PORT</span> وارد کنید. نکته ۳: در آدرس sub، مسیر پیکربندی‌شده در پنل (مثل <span class="mono" style="display:inline">/amirr/</span>) را هم بنویسید.</p>`;
   send(res, 200, layout('پنل‌های سنایی', body, ctx.user));
 });
 
-async function panelFromForm(req, { requirePassword = true } = {}) {
+async function panelFromForm(req) {
   const b = new URLSearchParams((await readBody(req)).toString());
   const p = {
     name: (b.get('name') || '').trim(),
     base_url: (b.get('base_url') || '').trim().replace(/\/+$/, ''),
     api_token: (b.get('api_token') || '').trim(),
-    username: (b.get('username') || '').trim(),
     sub_url: (b.get('sub_url') || '').trim().replace(/\/+$/, '') || null,
     default_inbound_id: b.get('default_inbound_id') ? Number(b.get('default_inbound_id')) : null,
   };
-  const pw = b.get('password') || '';
-  if (requirePassword && !pw) throw new Error('رمز عبور الزامی است');
-  if (pw) p.password = pw;
-  if (!p.name || !p.base_url || !p.username) throw new Error('نام، آدرس و نام کاربری الزامی است');
+  if (!p.name || !p.base_url) throw new Error('نام و آدرس پنل الزامی است');
   return p;
 }
 
@@ -710,8 +703,8 @@ route('POST', '/admin/panels/new', async (req, res, ctx) => {
   if (!requireAdmin(ctx)) return;
   try {
     const p = await panelFromForm(req);
-    db.prepare('INSERT INTO panels (name, base_url, username, password, api_token, sub_url, default_inbound_id) VALUES (?,?,?,?,?,?,?)')
-      .run(p.name, p.base_url, p.username, p.password, p.api_token || null, p.sub_url, p.default_inbound_id);
+    db.prepare('INSERT INTO panels (name, base_url, api_token, sub_url, default_inbound_id) VALUES (?,?,?,?,?)')
+      .run(p.name, p.base_url, p.api_token || null, p.sub_url, p.default_inbound_id);
   } catch (e) { return redirect(res, '/admin/panels?err=' + encodeURIComponent(e.message)); }
   redirect(res, '/admin/panels');
 });
@@ -719,15 +712,9 @@ route('POST', '/admin/panels/new', async (req, res, ctx) => {
 route('POST', '/admin/panels/:id', async (req, res, ctx) => {
   if (!requireAdmin(ctx)) return;
   try {
-    const p = await panelFromForm(req, { requirePassword: false });
-    const base = 'UPDATE panels SET name=?, base_url=?, username=?, api_token=?, sub_url=?, default_inbound_id=?';
-    if (p.password) {
-      db.prepare(base + ', password=? WHERE id=?')
-        .run(p.name, p.base_url, p.username, p.api_token || null, p.sub_url, p.default_inbound_id, p.password, ctx.params.id);
-    } else {
-      db.prepare(base + ' WHERE id=?')
-        .run(p.name, p.base_url, p.username, p.api_token || null, p.sub_url, p.default_inbound_id, ctx.params.id);
-    }
+    const p = await panelFromForm(req);
+    db.prepare('UPDATE panels SET name=?, base_url=?, api_token=?, sub_url=?, default_inbound_id=? WHERE id=?')
+      .run(p.name, p.base_url, p.api_token || null, p.sub_url, p.default_inbound_id, ctx.params.id);
   } catch (e) { return redirect(res, '/admin/panels?err=' + encodeURIComponent(e.message)); }
   redirect(res, '/admin/panels');
 });

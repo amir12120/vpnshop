@@ -105,8 +105,10 @@ jobs:
           curl -s -H "Cookie: $cookie" http://127.0.0.1:8443/admin | grep -q "پنل مدیریت"
           echo "GET /admin with session -> renders admin panel"
 
-      - name: CLI smoke (status / doctor / ports)
+      - name: CLI smoke (menu opens, status / doctor / ports / version)
         run: |
+          # `vpnshop` with no args must open the interactive menu (regression guard)
+          printf '0\n' | sudo vpnshop | grep -q "VPN Shop Manager" && echo "interactive menu opens OK"
           sudo vpnshop status
           sudo vpnshop doctor
           sudo vpnshop ports | head -8

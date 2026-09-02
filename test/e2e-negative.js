@@ -144,13 +144,13 @@ const get = (path, cookie) => fetch(SHOP + path, { redirect: 'manual', headers: 
 
   // ---- panel test with wrong credentials reports failure, server stays up
   {
-    await form('/admin/panels/new', { name: 'wrongcreds', base_url: `http://127.0.0.1:${process.argv[3] || 2053}`, username: 'admin', password: 'WRONG', default_inbound_id: '1' }, admin);
+    await form('/admin/panels/new', { name: 'wrongcreds', base_url: `http://127.0.0.1:${process.argv[3] || 2053}`, api_token: 'WRONG-TOKEN', default_inbound_id: '1' }, admin);
     const panels = await (await get('/admin/panels', admin)).text();
     const id = (panels.match(/\/admin\/panels\/(\d+)\/test(?![\s\S]*\/admin\/panels\/\d+\/test)/) || [])[1];
     if (id) {
       await form(`/admin/panels/${id}/test`, {}, admin);
       const after = await (await get('/admin/panels', admin)).text();
-      check('wrong panel creds -> test reports failure', /login failed/.test(after));
+      check('wrong panel token -> test reports failure', /unexpected response|login failed|unauthorized/i.test(after));
       await form(`/admin/panels/${id}/delete`, {}, admin);
     } else {
       check('wrong-creds panel created for test', false);

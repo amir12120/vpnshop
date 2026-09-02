@@ -76,7 +76,8 @@ async function multipart(path, cookie, fields, file) {
     method: 'POST', cookie: adminCookie,
     form: new URLSearchParams({
       name: 'mock', base_url: `http://127.0.0.1:${MOCK_PORT}`,
-      username: 'admin', password: 'panel123', default_inbound_id: '1',
+      api_token: 'mock-api-token-123', sub_url: `http://127.0.0.1:${MOCK_PORT}/sub`,
+      default_inbound_id: '1',
     }),
   });
   check('panel added', r.res.status === 302);
