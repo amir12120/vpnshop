@@ -378,7 +378,7 @@ cmd_ports() {
 #   --purge      alias for the default full removal (kept for older habits)
 cmd_uninstall() {
   need_root
-  local keep=false full=false
+  local keep=false full=true   # default: FULL removal (DB included)
   for a in "$@"; do
     [ "$a" = "--keep-data" ] && keep=true
     [ "$a" = "--purge" ] && full=true
