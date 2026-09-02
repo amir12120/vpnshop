@@ -31,6 +31,15 @@ need_root() {
 }
 get_domain() { grep -oP 'server_name\s+\K[^;]+' "$NGINX_SITE" 2>/dev/null | awk '{print $1}' || true; }
 get_port()   { grep -oP 'Environment=PORT=\K\d+' /etc/systemd/system/${SERVICE}.service 2>/dev/null || echo 3000; }
+get_public_port() {  # public port nginx listens on in domain mode (empty = IP:PORT mode)
+  [ -f "$NGINX_SITE" ] || return 0
+  local p
+  p=$(grep -oP 'listen\s+\K\d+(?=\s+ssl)' "$NGINX_SITE" 2>/dev/null | head -1)
+  if [ -z "$p" ]; then
+    p=$(grep -oP 'listen\s+\K\d+' "$NGINX_SITE" 2>/dev/null | grep -v '^80$' | head -1)
+  fi
+  [ -n "$p" ] && echo "$p"
+}
 
 # ---------------------------------------------------------------- service
 cmd_status() {
@@ -39,8 +48,20 @@ cmd_status() {
   systemctl is-enabled "$SERVICE" >/dev/null 2>&1 && ok "vpnshop: enabled (starts on boot)" || dim "vpnshop: disabled"
   echo -e "\n${c_info}── Endpoints ──${c_off}"
   local port; port=$(get_port); local domain; domain=$(get_domain)
-  dim " local:   http://127.0.0.1:${port}"
-  [ -n "$domain" ] && dim " domain:  ${domain} (nginx)"
+  local pub; pub=$(get_public_port)
+  dim " backend:  http://127.0.0.1:${port} (node, internal)"
+  if [ -n "$domain" ] && [ -n "$pub" ]; then
+    if grep -q "listen ${pub} ssl" "$NGINX_SITE" 2>/dev/null; then
+      ok " public:   https://${domain}:${pub}"
+    else
+      dim " public:   http://${domain}:${pub}"
+    fi
+    dim " admin:    .../admin  |  register: .../register"
+  elif [ -n "$domain" ]; then
+    dim " domain:   ${domain} (nginx)"
+  else
+    dim " public:   http://SERVER_IP:${port} (no domain — node serves directly)"
+  fi
   echo -e "\n${c_info}── Disk ──${c_off}"
   du -sh "$APP_DIR/data" "$APP_DIR/public/uploads" 2>/dev/null | sed 's/^/ /' || true
 }
@@ -133,27 +154,36 @@ cmd_admin() {
 # ---------------------------------------------------------------- port
 cmd_port() {
   need_root
-  local p="${1:-}"; [[ "$p" =~ ^[0-9]+$ ]] || { err "usage: vpnshop port <new-port>"; exit 1; }
-  sed -i "s/^Environment=PORT=.*/Environment=PORT=${p}/" /etc/systemd/system/${SERVICE}.service
-  if [ -f "$NGINX_SITE" ]; then
-    sed -i "s|proxy_pass http://127.0.0.1:[0-9]*;|proxy_pass http://127.0.0.1:${p};|" "$NGINX_SITE"
-    nginx -t >/dev/null 2>&1 && systemctl reload nginx || { err "nginx config error — check manually"; }
+  local p="${1:-}"; [[ "$p" =~ ^[0-9]+$ ]] || { err "usage: vpnshop port <new-public-port>"; exit 1; }
+  if [ -f "$NGINX_SITE" ] && [ -n "$(get_domain)" ]; then
+    # domain mode: the user-chosen port is nginx's public listener
+    local old; old=$(get_public_port)
+    sed -i "s/^    listen [0-9]*\( ssl\)\?;/    listen ${p}\1;/" "$NGINX_SITE"
+    nginx -t >/dev/null 2>&1 && systemctl reload nginx \
+      || { err "nginx config error — reverting"; [ -n "$old" ] && sed -i "s/^    listen [0-9]*\( ssl\)\?;/    listen ${old}\1;/" "$NGINX_SITE" && systemctl reload nginx; exit 1; }
+    ok "public port is now ${p} (backend stays internal)"
+  else
+    # IP:PORT mode: node serves the public port directly
+    sed -i "s/^Environment=PORT=.*/Environment=PORT=${p}/" /etc/systemd/system/${SERVICE}.service
+    systemctl daemon-reload && systemctl restart "$SERVICE"
+    ok "shop now runs on port $p"
   fi
-  systemctl daemon-reload && systemctl restart "$SERVICE"
-  ok "shop now runs on port $p"
 }
 
 # ---------------------------------------------------------------- ssl manager
 ssl_status() {
   local domain; domain=$(get_domain)
+  local pub; pub=$(get_public_port)
   echo -e "${c_info}── SSL status ──${c_off}"
   if command -v certbot >/dev/null 2>&1; then certbot certificates 2>/dev/null || true; fi
-  if [ -n "$domain" ] && grep -q "443 ssl" "$NGINX_SITE" 2>/dev/null; then
-    ok "nginx: HTTPS enabled for ${domain}"
-    echo | timeout 5 openssl s_client -connect "${domain}:443" -servername "$domain" 2>/dev/null \
+  if [ -n "$domain" ] && [ -n "$pub" ] && grep -q "listen ${pub} ssl" "$NGINX_SITE" 2>/dev/null; then
+    ok "shop address: https://${domain}:${pub}"
+    echo | timeout 5 openssl s_client -connect "${domain}:${pub}" -servername "$domain" 2>/dev/null \
       | openssl x509 -noout -dates -issuer 2>/dev/null | sed 's/^/ /' || dim " (cert not reachable from this host)"
+  elif [ -n "$domain" ]; then
+    dim "HTTP only on port ${pub:-80} — enable with: vpnshop ssl letsencrypt ${domain}"
   else
-    dim "nginx: HTTP only (no SSL configured)"
+    dim "no domain configured — SSL manager needs a domain"
   fi
   systemctl is-active certbot.timer >/dev/null 2>&1 && ok "auto-renew: certbot.timer active" || dim "auto-renew: timer not found"
 }
@@ -167,16 +197,11 @@ port80_holder() {  # prints the process name holding port 80, empty if free
   ss -tlnp "sport = :80" 2>/dev/null | grep -oP 'users:\(\("\K[^"]+' | head -1
 }
 
-write_ssl_vhost() {  # $1 = domain — rewrite vhost: 80 redirects to 443 ssl
-  local domain="$1"
+write_ssl_vhost() {  # $1 = domain, $2 = public port — TLS on the user's port, proxy to node
+  local domain="$1" pport="$2"
   cat >"$NGINX_SITE" <<EOF
 server {
-    listen 80;
-    server_name ${domain};
-    return 301 https://\$host\$request_uri;
-}
-server {
-    listen 443 ssl;
+    listen ${pport} ssl;
     server_name ${domain};
     ssl_certificate /etc/letsencrypt/live/${domain}/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/${domain}/privkey.pem;
@@ -191,14 +216,8 @@ server {
 EOF
 }
 
-ssl_letsencrypt() {
-  need_root
-  local domain="${1:-$(get_domain)}"
-  [ -n "$domain" ] || { err "usage: vpnshop ssl letsencrypt <domain>"; exit 1; }
-  command -v certbot >/dev/null 2>&1 || apt-get install -y certbot
-  info "checking port 80 before issuing the certificate..."
-
-  local stopped_nginx=0 holder
+issue_cert() {  # $1 = domain — standalone issuance, nginx stopped around the challenge
+  local domain="$1" stopped_nginx=0 holder
   if holder=$(port80_holder) && [ -n "$holder" ]; then
     if [ "$holder" = "nginx" ]; then
       echo "  port 80 is held by nginx — stopping it temporarily for the challenge..."
@@ -206,8 +225,8 @@ ssl_letsencrypt() {
       stopped_nginx=1
     else
       echo "!! port 80 is held by '$holder' (not nginx) — the challenge needs port 80."
-      echo "   Free port 80 first, then retry:  vpnshop ssl letsencrypt $domain"
-      exit 1
+      echo "   Free port 80 first, then retry."
+      return 1
     fi
   else
     echo "  port 80 is free."
@@ -223,11 +242,10 @@ ssl_letsencrypt() {
   if [ "$stopped_nginx" = "1" ]; then
     systemctl start nginx && ok "nginx restarted"
   fi
-  [ "$cert_ok" = "1" ] || { err "certificate issuance failed — check DNS points to this server"; return 1; }
+  [ "$cert_ok" = "1" ]
+}
 
-  write_ssl_vhost "$domain"
-  nginx -t >/dev/null 2>&1 && systemctl reload nginx && ok "HTTPS enabled for ${domain} (80 -> 443)"
-
+install_renewal_hooks() {
   # standalone renewal needs port 80: stop/start nginx around each renewal
   mkdir -p /etc/letsencrypt/renewal-hooks/pre /etc/letsencrypt/renewal-hooks/post
   printf '#!/bin/sh\nsystemctl stop nginx\n'  > /etc/letsencrypt/renewal-hooks/pre/vpnshop-standalone
@@ -236,14 +254,44 @@ ssl_letsencrypt() {
   systemctl enable --now certbot.timer >/dev/null 2>&1 || true
   ok "auto-renew timer active (hooks stop/start nginx around renewals)"
 }
+
+ssl_letsencrypt() {  # [--port N] [domain] — shop address becomes https://Domain:N
+  need_root
+  local domain="" pport=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --port) pport="$2"; shift 2 ;;
+      *)      domain="$1"; shift ;;
+    esac
+  done
+  domain="${domain:-$(get_domain)}"
+  [ -n "$domain" ] || { err "usage: vpnshop ssl letsencrypt [--port N] <domain>"; exit 1; }
+  command -v certbot >/dev/null 2>&1 || apt-get install -y certbot
+  if [ -z "$pport" ]; then
+    pport=$(get_public_port)
+    if [ -z "$pport" ]; then
+      read -rp "Public port for https://${domain}:PORT [8443]: " pport
+      pport=${pport:-8443}
+    fi
+  fi
+
+  info "checking port 80 before issuing the certificate..."
+  issue_cert "$domain" || { err "certificate issuance failed — check DNS points to this server"; return 1; }
+
+  write_ssl_vhost "$domain" "$pport"
+  nginx -t >/dev/null 2>&1 && systemctl reload nginx \
+    && ok "HTTPS enabled: https://${domain}:${pport}"
+  install_renewal_hooks
+}
 ssl_remove() {
   need_root
   local domain; domain=$(get_domain)
+  local pub; pub=$(get_public_port)
   [ -f "$NGINX_SITE" ] || { err "nginx site not found"; exit 1; }
-  confirm "remove HTTPS and revert ${domain:-site} to plain HTTP?" || return 0
+  confirm "remove HTTPS and revert ${domain:-site} to plain HTTP on port ${pub:-80}?" || return 0
   cat >"$NGINX_SITE" <<EOF
 server {
-    listen 80;
+    listen ${pub:-80};
     server_name ${domain:-_};
     client_max_body_size 12m;
     location / {
@@ -254,7 +302,7 @@ server {
     }
 }
 EOF
-  nginx -t >/dev/null 2>&1 && systemctl reload nginx && ok "reverted to HTTP"
+  nginx -t >/dev/null 2>&1 && systemctl reload nginx && ok "reverted to HTTP on port ${pub:-80}"
   if command -v certbot >/dev/null 2>&1 && [ -n "$domain" ]; then
     confirm "also delete the certbot certificate for ${domain}?" && certbot delete --cert-name "$domain" --non-interactive || true
   fi
@@ -264,7 +312,7 @@ cmd_ssl() {
   case "${1:-menu}" in
     status)      ssl_status ;;
     renew)       ssl_renew ;;
-    letsencrypt) shift || true; ssl_letsencrypt "${1:-}" ;;
+    letsencrypt|issue) shift || true; ssl_letsencrypt "$@" ;;
     remove)      ssl_remove ;;
     menu|"")
       while true; do
@@ -353,7 +401,9 @@ vpnshop — management CLI for VPN Config Shop
   vpnshop restore <file>       restore from a backup
   vpnshop ssl                  interactive SSL manager
   vpnshop ssl status           show certificates & expiry
-  vpnshop ssl letsencrypt <d>  enable HTTPS for domain (auto-renew on)
+  vpnshop ssl letsencrypt [--port N] <d>
+                               enable HTTPS — shop becomes https://Domain:Port
+                               (default port: the one already configured)
   vpnshop ssl renew            force renew certificates now
   vpnshop ssl remove           revert to plain HTTP
   vpnshop doctor               health check: DB, panels/tunnel reachability, uploads

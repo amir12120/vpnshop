@@ -55,8 +55,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Run INSTALL.sh non-interactively (port 3000, no domain, HTTP)
-        run: printf '3000\n\nadmin\nadminpass123\n' | sudo bash INSTALL.sh
+      - name: Run INSTALL.sh non-interactively (domain mode, public port 8443, SSL off)
+        # prompt order: Username / Password / Domain / Port [ / SSL choice ]
+        run: printf 'admin\nadminpass123\nshop.test.local\n8443\n2\n' | sudo bash INSTALL.sh
 
       - name: Verify pre-flight + GitHub transport probe ran
         run: |
@@ -68,16 +69,24 @@ jobs:
       - name: Force-update via git transport (exercises cmd_update)
         run: sudo vpnshop update
 
-      - name: Verify shop is serving
+      - name: Verify nginx serves the public port and proxies to the internal backend
         run: |
           ok=""
           for i in $(seq 1 30); do
-            curl -sf http://127.0.0.1:3000/ >/dev/null && ok=1 && break
+            curl -sf http://127.0.0.1:8443/ >/dev/null && ok=1 && break
             sleep 1
           done
-          if [ "${ok:-}" != "1" ]; then sudo journalctl -u vpnshop -n 50 --no-pager; exit 1; fi
-          curl -sf http://127.0.0.1:3000/login | grep -q "ورود"
-          code=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3000/admin)
+          if [ "${ok:-}" != "1" ]; then sudo journalctl -u vpnshop -n 50 --no-pager; sudo nginx -t; exit 1; fi
+          # public URL shape is http://Domain:Port — nginx on 8443, node internal on 3001
+          curl -sf http://127.0.0.1:8443/login | grep -q "ورود"
+          sudo grep -q "listen 8443;" /etc/nginx/sites-available/vpnshop
+          sudo grep -q "Environment=PORT=8444" /etc/systemd/system/vpnshop.service
+          sudo grep -q "Environment=HOST=127.0.0.1" /etc/systemd/system/vpnshop.service
+          curl -sf http://127.0.0.1:8444/ >/dev/null && echo "internal backend on 8444 (loopback-only) OK"
+          ! curl -sf --max-time 3 http://$(hostname -I | awk '{print $1}'):8444/ >/dev/null 2>&1 \
+            && echo "internal port NOT reachable externally — good" \
+            || { echo "internal port must not be reachable externally"; exit 1; }
+          code=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8443/admin)
           echo "GET /admin (anonymous) -> $code (302 expected: redirected to /login)"
           [ "$code" = "302" ]
 
@@ -86,13 +95,13 @@ jobs:
           code=$(curl -s -o /dev/null -w '%{http_code}' \
             -d 'username=admin&password=adminpass123' \
             -H 'Content-Type: application/x-www-form-urlencoded' \
-            http://127.0.0.1:3000/login)
+            http://127.0.0.1:8443/login)
           echo "POST /login -> $code (302 expected)"
           [ "$code" = "302" ]
           cookie=$(curl -si -d 'username=admin&password=adminpass123' \
             -H 'Content-Type: application/x-www-form-urlencoded' \
-            http://127.0.0.1:3000/login | grep -i '^set-cookie' | cut -d' ' -f2 | cut -d';' -f1)
-          curl -s -H "Cookie: $cookie" http://127.0.0.1:3000/admin | grep -q "پنل مدیریت"
+            http://127.0.0.1:8443/login | grep -i '^set-cookie' | cut -d' ' -f2 | cut -d';' -f1)
+          curl -s -H "Cookie: $cookie" http://127.0.0.1:8443/admin | grep -q "پنل مدیریت"
           echo "GET /admin with session -> renders admin panel"
 
       - name: CLI smoke (status / doctor / ports)
