@@ -8,9 +8,9 @@ const http = require('http');
 const API_TOKEN = 'mock-api-token-123';
 const clientsBySub = {};   // subId -> { email, uuid }
 
-function freshInbound() {
+function freshInbound(id, port, remark) {
   return {
-    id: 1, port: 443, protocol: 'vless', remark: 'main-inbound',
+    id, port, protocol: 'vless', remark,
     listen: '', // '' = all interfaces
     settings: JSON.stringify({ clients: [] }),
     streamSettings: JSON.stringify({
@@ -20,9 +20,20 @@ function freshInbound() {
     }),
   };
 }
-let INBOUND = freshInbound();
+const INBOUNDS = [freshInbound(1, 443, 'main-inbound'), freshInbound(2, 8443, 'second-inbound')];
 
-const sessions = new Set();
+const sessions = new Set();   // sid -> { csrf }  (v3 requires CSRF on POSTs)
+const sessionMeta = new Map();
+let csrfCounter = 0;
+function newCsrf() { return 'csrf-token-' + (++csrfCounter); }
+
+// POST endpoints require X-CSRF-Token unless authenticated via Bearer token
+function csrfOk(req, sid) {
+  if (req.headers.authorization === `Bearer ${API_TOKEN}`) return true;
+  const meta = sessionMeta.get(sid);
+  if (!meta || !meta.csrf) return false;
+  return req.headers['x-csrf-token'] === meta.csrf;
+}
 
 function authed(req) {
   if (req.headers.authorization === `Bearer ${API_TOKEN}`) return true;
@@ -43,31 +54,49 @@ const server = http.createServer((req, res) => {
     let jbody = null;
     try { jbody = JSON.parse(body); } catch { /* ignore */ }
 
+    if (u.pathname === '/csrf-token' && req.method === 'GET') {
+      const sid = 'mocksession' + Math.random().toString(16).slice(2);
+      sessions.add(sid);
+      const csrf = newCsrf();
+      sessionMeta.set(sid, { csrf });
+      res.setHeader('Set-Cookie', `3x-ui=${sid}; Path=/`);
+      return res.end(JSON.stringify({ success: true, msg: '', obj: csrf }));
+    }
+
     if (u.pathname === '/login' && req.method === 'POST') {
+      const sid = [...sessionMeta.keys()].find((s) => (req.headers.cookie || '').includes(s));
+      if (!sid || !csrfOk(req, sid)) {
+        return sendJSON(res, 403, { success: false, msg: 'csrf token required' });
+      }
       if (params.get('username') === 'admin' && params.get('password') === 'panel123') {
-        const sid = 'mocksession' + Math.random().toString(16).slice(2);
-        sessions.add(sid);
-        res.setHeader('Set-Cookie', `3x-ui=${sid}; Path=/`);
         return res.end(JSON.stringify({ success: true, msg: 'login ok', obj: null }));
       }
       return sendJSON(res, 401, { success: false, msg: 'bad credentials' });
     }
 
+    const sid = [...sessionMeta.keys()].find((s) => (req.headers.cookie || '').includes(s));
     if (!authed(req)) {
       return sendJSON(res, 401, { success: false, msg: 'unauthorized' });
+    }
+    if (req.method !== 'GET' && req.method !== 'HEAD' && !csrfOk(req, sid)) {
+      return sendJSON(res, 403, { success: false, msg: 'csrf token required' });
     }
 
     // ---------- v3 ----------
     if (u.pathname === '/panel/api/clients/add' && req.method === 'POST') {
       const { client, inboundIds = [] } = jbody || {};
-      if (!client || !inboundIds.includes(INBOUND.id)) {
+      if (!client || !inboundIds.length) {
         return sendJSON(res, 400, { success: false, msg: 'client/inboundIds required' });
       }
       const c = { ...client };
       clientsBySub[c.subId || c.email] = c;
-      INBOUND.settings = JSON.stringify({
-        clients: [...JSON.parse(INBOUND.settings).clients, c],
-      });
+      for (const id of inboundIds) {
+        const ib = INBOUNDS.find((x) => x.id === id);
+        if (!ib) return sendJSON(res, 404, { success: false, msg: `inbound ${id} not found` });
+        ib.settings = JSON.stringify({
+          clients: [...JSON.parse(ib.settings).clients, c],
+        });
+      }
       return sendJSON(res, 200, { success: true, msg: 'client added', obj: null });
     }
     if (u.pathname.startsWith('/panel/api/clients/subLinks/')) {
@@ -80,15 +109,15 @@ const server = http.createServer((req, res) => {
       const email = decodeURIComponent(u.pathname.split('/').pop());
       const c = Object.values(clientsBySub).find((x) => x.email === email);
       if (!c) return sendJSON(res, 404, { success: false, msg: 'not found' });
-      return sendJSON(res, 200, {
-        success: true, msg: '',
-        obj: [`vless://${c.id}@127.0.0.1:443?type=ws&security=tls&path=%2Fwspath#main-inbound`],
-      });
+      const links = INBOUNDS
+        .filter((ib) => (JSON.parse(ib.settings).clients || []).some((x) => x.email === email))
+        .map((ib) => `vless://${c.id}@127.0.0.1:${ib.port}?type=ws&security=tls&path=%2Fwspath#${ib.remark}`);
+      return sendJSON(res, 200, { success: true, msg: '', obj: links });
     }
 
     // ---------- v2 (fallback path) ----------
     if (u.pathname === '/panel/api/inbounds/list') {
-      return res.end(JSON.stringify({ success: true, msg: '', obj: [INBOUND] }));
+      return res.end(JSON.stringify({ success: true, msg: '', obj: INBOUNDS }));
     }
     if (u.pathname === '/panel/api/inbounds/addClient' && req.method === 'POST') {
       const inboundId = params.get('id');
