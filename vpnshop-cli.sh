@@ -9,7 +9,7 @@
 # ============================================================
 set -euo pipefail
 
-VERSION="1.3.0"
+VERSION="1.4.0"
 APP_DIR="${VPN_SHOP_APP_DIR:-/opt/vpnshop}"
 SERVICE="vpnshop"
 NGINX_SITE="/etc/nginx/sites-available/vpnshop"
@@ -371,18 +371,23 @@ cmd_ports() {
 }
 
 # ---------------------------------------------------------------- uninstall
-# DEFAULT (no flags): stop + disable the service. EVERYTHING is kept —
-# app code, database, receipts, nginx config, certificates — so nothing
-# about the shop is lost and `vpnshop install` can bring it back anytime.
-# Only --purge performs the destructive full removal.
+# DEFAULT: FULL removal — service, unit, nginx site, certificates and the app
+# directory INCLUDING the database + receipts are deleted, so a fresh install
+# starts clean. Two confirmation prompts guard it.
+#   --keep-data  only stops the service; every file (DB, receipts, nginx) stays
+#   --purge      alias for the default full removal (kept for older habits)
 cmd_uninstall() {
   need_root
-  local purge=false
-  for a in "$@"; do [ "$a" = "--purge" ] && purge=true; done
+  local keep=false full=false
+  for a in "$@"; do
+    [ "$a" = "--keep-data" ] && keep=true
+    [ "$a" = "--purge" ] && full=true
+  done
+  $keep && full=false
 
-  if $purge; then
-    echo -e "${c_bad}FULL removal (--purge): service, nginx site, data and /opt/vpnshop will be DELETED.${c_off}"
-    confirm "continue with full uninstall (--purge)?" || { dim "aborted"; return 0; }
+  if $full; then
+    echo -e "${c_bad}FULL uninstall: service, nginx site, certificates and /opt/vpnshop (database + receipts) will be DELETED.${c_off}"
+    confirm "delete the whole installation, including the database?" || { dim "aborted"; return 0; }
   else
     echo -e "${c_bad}This stops the shop service.${c_off}"
     dim "Your data is NOT touched: database, receipts, app files and nginx config stay."
@@ -393,7 +398,7 @@ cmd_uninstall() {
   systemctl disable --now "$SERVICE" 2>/dev/null || true
   ok "service vpnshop stopped and disabled (starts on boot: off)"
 
-  if $purge; then
+  if $full; then
     rm -f /etc/systemd/system/${SERVICE}.service && systemctl daemon-reload
     rm -f "$NGINX_ENABLED" "$NGINX_SITE" 2>/dev/null || true
     nginx -t >/dev/null 2>&1 && systemctl reload nginx || true
@@ -403,10 +408,10 @@ cmd_uninstall() {
       [ -n "$domain" ] && confirm "delete Let's Encrypt cert for ${domain}?" && certbot delete --cert-name "$domain" --non-interactive || true
     fi
     confirm "delete /opt/vpnshop (database + receipts)?" && rm -rf "$APP_DIR" && ok "app directory deleted"
-    ok "uninstall --purge complete — nothing remains"
+    ok "uninstall complete — nothing remains. A fresh install starts with an empty database"
   else
     dim "kept: ${APP_DIR} (app + data), nginx site, certificates"
-    ok "uninstall complete — data preserved. Full wipe: vpnshop uninstall --purge"
+    ok "uninstall (keep-data) complete — data preserved. Full wipe: vpnshop uninstall"
   fi
 }
 
@@ -442,8 +447,9 @@ vpnshop — management CLI for VPN Config Shop
   vpnshop doctor               health check: DB, panels/tunnel reachability, uploads
   vpnshop ports                list all listening ports (tunnel conflict check)
   vpnshop install              re-run the installer (keeps existing data)
-  vpnshop uninstall            stop service — data, files & config are KEPT
-  vpnshop uninstall --purge    full removal (deletes data, receipts, certs)
+  vpnshop uninstall            FULL removal — service, nginx, certs and the
+                               database are deleted (asks for confirmation)
+  vpnshop uninstall --keep-data  stop the service only, keep all data/files
   vpnshop help                 this help
 EOF
 }
@@ -455,7 +461,7 @@ cmd_menu() {
     echo " 2) restart        6) restore        10) change port"
     echo " 3) logs           7) update         11) reset admin password"
     echo " 4) info/help      8) admin user     12) doctor (tunnel/panel check)"
-    echo " 14) re-install (keeps data)            0) exit  (u = uninstall, data kept)"
+    echo " 14) re-install (keeps data)            0) exit  (u = uninstall, full removal)"
     read -rp "choice: " a
     case "$a" in
       1) cmd_status ;;  2) cmd_restart ;; 3) read -rp "lines [50]: " n; cmd_logs "${n:-50}" ;;
