@@ -68,6 +68,13 @@ function sanitizeClientName(s) {
   return v.slice(0, 60);
 }
 
+// shared order-status labels; the customer and admin pages keep their own
+// wording for a few rows via the overrides below.
+const ORDER_STATUS_FA_BASE = {
+  pending_payment: 'در انتظار پرداخت', approved: 'تأیید شد', rejected: 'رد شد',
+  provisioning: 'در حال ساخت', delivered: 'تحویل شده',
+};
+
 // current user from session cookie (null if none)
 function getUser(req) {
   const sess = parseSession(parseCookies(req).session);
@@ -495,11 +502,7 @@ route('GET', '/orders', async (req, res, { user, query }) => {
     JOIN plans p ON p.id = o.plan_id
     LEFT JOIN deliveries d ON d.order_id = o.id
     WHERE o.user_id = ? ORDER BY o.id DESC`).all(user.id);
-  const statusFa = {
-    pending_payment: 'در انتظار پرداخت', awaiting_review: 'در انتظار تأیید مدیر',
-    approved: 'تأیید شد', rejected: 'رد شد', provisioning: 'در حال ساخت',
-    delivered: 'تحویل شده', failed: 'خطا در ساخت',
-  };
+  const statusFa = { ...ORDER_STATUS_FA_BASE, awaiting_review: 'در انتظار تأیید مدیر', failed: 'خطا در ساخت' };
   const body = `
   <h1>سفارش‌های من</h1>
   ${query.ok ? `<div class="msg ok">${esc(query.ok)}</div>` : ''}
@@ -573,11 +576,7 @@ route('GET', '/admin/orders', async (req, res, ctx) => {
     LEFT JOIN deliveries d ON d.order_id = o.id
     ${status ? 'WHERE o.status = ?' : ''}
     ORDER BY o.id DESC LIMIT 200`).all(...(status ? [status] : []));
-  const statusFa = {
-    pending_payment: 'در انتظار پرداخت', awaiting_review: 'در انتظار تأیید',
-    approved: 'تأیید شد', rejected: 'رد شد', provisioning: 'در حال ساخت',
-    delivered: 'تحویل شده', failed: 'خطا',
-  };
+  const statusFa = { ...ORDER_STATUS_FA_BASE, awaiting_review: 'در انتظار تأیید', failed: 'خطا' };
   const body = `
   <h1>سفارش‌ها</h1>
   ${query.err ? `<div class="msg err">⚠ ${esc(query.err)}</div>` : ''}
