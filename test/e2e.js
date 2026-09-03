@@ -117,6 +117,20 @@ async function multipart(path, cookie, fields, file) {
   const ordersPage = await (await api('/orders', { cookie: custCookie })).res.text();
   check('order shows awaiting_review', ordersPage.includes('در انتظار تأیید مدیر'));
   check('order not delivered yet', !ordersPage.includes('لینک اشتراک (برای'));
+  const custOrderId = (ordersPage.match(/سفارش #(\d+)/) || [])[1];
+  check('customer order id found', !!custOrderId);
+
+  console.log('— customer: clean plans page');
+  const plansPage = await (await api('/plans')).res.text();
+  check('/plans lists plan cards', plansPage.includes('۱۰ گیگ یک‌ماهه'));
+  check('/plans shows no hero header', !plansPage.includes('اینترنت پرسرعت'));
+
+  console.log('— admin: new-order polling API');
+  const poll0 = JSON.parse(await (await api('/api/admin/orders/new?after=0', { cookie: adminCookie })).res.text());
+  check('poll API lists the new order', poll0.orders.some((o) => o.id === Number(custOrderId)));
+  check('poll API reports awaiting count', poll0.awaiting >= 1);
+  const pollAnon = await api('/api/admin/orders/new?after=0');
+  check('poll API requires admin login', pollAnon.res.status === 302);
 
   console.log('— admin: approve → auto-provision → delivery');
   const adminOrders = await (await api('/admin/orders', { cookie: adminCookie })).res.text();
@@ -138,6 +152,10 @@ async function multipart(path, cookie, fields, file) {
   check('custom username used in sub link', custOrders2.includes('/sub/alireza'));
   check('subscription link shown', /http:\/\/127\.0\.0\.1:\d+\/sub\/[A-Za-z0-9_@.-]+/.test(custOrders2));
   check('config link (vless) shown', custOrders2.includes('vless://'));
+  check('per-link copy buttons rendered', custOrders2.includes('vpnCopyEl'));
+  check('copy-all button rendered', custOrders2.includes('کپی همه لینک‌ها'));
+  const poll1 = JSON.parse(await (await api('/api/admin/orders/new?after=' + custOrderId, { cookie: adminCookie })).res.text());
+  check('no new orders after approval', poll1.orders.length === 0 && poll1.awaiting === 0);
 
   console.log('— security: private receipt');
   const receiptPath = (custOrders2.match(/\/uploads\/receipt_[a-z0-9_]+\.png/) || adminOrders.match(/\/uploads\/receipt_[a-z0-9_]+\.png/) || [])[0];

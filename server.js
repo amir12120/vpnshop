@@ -167,6 +167,17 @@ img.qr{background:#fff;padding:8px;border-radius:10px}
 .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
 footer.foot{border-top:1px solid var(--line);padding:22px 0 30px;margin-top:40px;text-align:center;color:var(--mut);font-size:12.5px}
 @media(max-width:640px){.hero h1{font-size:25px}.nav{flex-direction:column;gap:10px}}
+.cp{display:flex;align-items:stretch;gap:8px}
+.cp .mono{flex:1;margin:0}
+.cp button{flex:0 0 auto;white-space:nowrap;min-height:40px}
+.pend{background:linear-gradient(120deg,#ff5c5c,#ff8a3d);color:#fff;font-size:11px;font-weight:800;border-radius:20px;padding:1px 8px;margin-inline-start:6px;vertical-align:middle}
+#toasts{position:fixed;bottom:16px;inset-inline-start:16px;z-index:200;display:flex;flex-direction:column;gap:10px;max-width:min(360px,calc(100vw - 32px))}
+.ntf{position:relative;background:linear-gradient(180deg,#1c2a4d,#141b2e);border:1px solid rgba(245,185,66,.55);border-inline-start:4px solid var(--gold);border-radius:12px;padding:12px 14px 12px 34px;box-shadow:0 12px 30px rgba(0,0,0,.5);animation:ntfIn .25s ease}
+@keyframes ntfIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+.ntf .ntf-t{font-weight:800;font-size:13.5px;color:#ffd97a}
+.ntf .ntf-b{font-size:12.5px;color:var(--txt);margin:2px 0 8px}
+.ntf a{font-size:12px;font-weight:700}
+.ntf .ntf-x{position:absolute;top:6px;inset-inline-end:8px;background:none;border:0;color:var(--mut);cursor:pointer;font-size:15px;padding:2px 6px;line-height:1}
 </style>
 </head>
 <body>
@@ -174,13 +185,85 @@ footer.foot{border-top:1px solid var(--line);padding:22px 0 30px;margin-top:40px
   <div class="wrap nav">
     <a class="brand" href="/">🛒 VPN<span>Shop</span></a>
     <nav>
-      ${user ? `<a href="/">پلن‌ها</a><a href="/orders">سفارش‌های من</a>${user.role === 'admin' ? '<a href="/admin">پنل مدیریت</a>' : ''}<a href="/logout" class="btn ghost sm">خروج (${esc(user.username)})</a>` : `<a href="/login">ورود</a><a href="/register" class="btn sm">عضویت</a>`}
+      <a href="/plans">پلن‌ها</a>
+      ${user ? `<a href="/orders">سفارش‌های من</a>${user.role === 'admin' ? '<a href="/admin">پنل مدیریت<span id="pendCount" class="pend" hidden></span></a>' : ''}<a href="/logout" class="btn ghost sm">خروج (${esc(user.username)})</a>` : `<a href="/login">ورود</a><a href="/register" class="btn sm">عضویت</a>`}
     </nav>
   </div>
 </header>
 <main>${body}</main>
 <footer class="foot"><div class="wrap">🛒 فروشگاه VPN — پرداخت کارت به کارت · تحویل خودکار کانفیگ و لینک اشتراک</div></footer>
+<div id="toasts"></div>
+${GLOBAL_JS}${user && user.role === 'admin' ? ADMIN_JS : ''}
 </body></html>`;
+
+// Client-side helpers — copy-to-clipboard for delivered config links.
+const GLOBAL_JS = `<script>
+function vpnCopy(text, btn){
+  var label = btn.innerHTML;
+  var done = function(){ btn.innerHTML = '✓ کپی شد'; btn.disabled = true;
+    setTimeout(function(){ btn.innerHTML = label; btn.disabled = false; }, 1600); };
+  var fallback = function(){
+    var ta = document.createElement('textarea');
+    ta.value = text; ta.style.cssText = 'position:fixed;opacity:0';
+    document.body.appendChild(ta); ta.focus(); ta.select();
+    var ok = false; try { ok = document.execCommand('copy'); } catch (e) {}
+    ta.remove(); if (ok) done(); else btn.innerHTML = 'خطا';
+  };
+  if (navigator.clipboard && window.isSecureContext){ navigator.clipboard.writeText(text).then(done).catch(fallback); }
+  else fallback();
+}
+function vpnCopyEl(id, btn){ var el = document.getElementById(id); if (el) vpnCopy(el.textContent, btn); }
+function vpnCopyAll(orderId, btn){
+  var parts = [];
+  var sub = document.getElementById('sub_' + orderId);
+  if (sub) parts.push(sub.textContent);
+  for (var i = 0; ; i++){
+    var el = document.getElementById('cfg_' + orderId + '_' + i);
+    if (!el) break; parts.push(el.textContent);
+  }
+  vpnCopy(parts.join('\\n'), btn);
+}
+</script>`;
+
+// Admin panel: poll every 5 s for brand-new orders and toast the admin on-screen.
+const ADMIN_JS = `<script>
+(function(){
+  var lastId = null, baseTitle = document.title, flashed = false;
+  var badge = document.getElementById('pendCount');
+  var host = document.getElementById('toasts');
+  if (!host) return;
+  function esc(s){ return String(s == null ? '' : s).replace(/[&<>"']/g, function(c){
+    return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]); }); }
+  function showToast(list){
+    var html = '';
+    for (var i = 0; i < list.length; i++){
+      var o = list[i];
+      html += '<div class="ntf"><button class="ntf-x" onclick="this.parentNode.remove()" title="بستن">✕</button>' +
+        '<div class="ntf-t">🛎 سفارش جدید #' + o.id + '</div>' +
+        '<div class="ntf-b">' + esc(o.username) + ' — ' + esc(o.plan_name) + '</div>' +
+        '<a href="/admin/orders?status=awaiting_review">بررسی و تحویل</a></div>';
+    }
+    host.insertAdjacentHTML('beforeend', html);
+    flashed = true; document.title = '🛎 سفارش جدید — ' + baseTitle;
+  }
+  function poll(){
+    fetch('/api/admin/orders/new?after=' + (lastId || 0), { headers: { Accept: 'application/json' } })
+      .then(function(r){ if (!r.ok) throw 0; return r.json(); })
+      .then(function(d){
+        if (badge){ if (d.awaiting > 0){ badge.hidden = false; badge.textContent = d.awaiting; }
+          else badge.hidden = true; }
+        if (lastId !== null && d.max > lastId){
+          var fresh = (d.orders || []).filter(function(o){ return o.id > lastId && o.status === 'awaiting_review'; });
+          if (fresh.length) showToast(fresh);
+        }
+        lastId = Math.max(lastId || 0, d.max);
+        if (flashed){ document.title = baseTitle; flashed = false; }
+      }).catch(function(){});
+  }
+  poll();
+  setInterval(poll, 5000);
+})();
+</script>`;
 
 // ---------------------------------------------------------------- PUBLIC: plans & register/login
 route('GET', '/', async (req, res, { user }) => {
@@ -198,22 +281,9 @@ route('GET', '/', async (req, res, { user }) => {
     <div class="card"><div class="ic">📲</div><h3>QR و لینک اشتراک</h3><p>با اسکن QR یا لینک اشتراک، روی هر اپ و هر دستگاهی وصل شوید.</p></div>
   </section>
 
-  <section class="plans">
+  <section class="plans" id="plans">
     <h2>بسته‌های اینترنتی</h2>
-    <div class="grid">
-    ${plans.map((p, idx) => `
-      <div class="card plan${idx === 1 ? ' popular' : ''}">
-        <div class="p-ic">📶</div>
-        <h2>${esc(p.name)}</h2>
-        <div class="p-feats">
-          <div>حجم: <b>${p.volume_gb == null ? 'نامحدود' : p.volume_gb + ' گیگابایت'}</b></div>
-          <div>زمان: <b>${p.duration_days == null ? 'نامحدود' : p.duration_days + ' روز'}</b></div>
-          <div>تعداد دستگاه: <b>${p.device_limit ?? 2}</b></div>
-        </div>
-        <div class="price">${fmtToman(p.price_toman)} تومان</div>
-        <a class="btn buy" href="/buy/${p.id}">خرید (کارت به کارت)</a>
-      </div>`).join('') || '<p class="mut">هنوز پلنی تعریف نشده است — به‌زودی.</p>'}
-    </div>
+    <div class="grid">${planCards(plans)}</div>
   </section>
 
   <section class="steps">
@@ -226,6 +296,29 @@ route('GET', '/', async (req, res, { user }) => {
     </div>
   </section>`;
   send(res, 200, layout('فروشگاه', body, user));
+});
+
+// shared plan-card markup (homepage + clean /plans page)
+function planCards(plans) {
+  if (!plans.length) return '<p class="mut">هنوز پلنی تعریف نشده است — به‌زودی.</p>';
+  return plans.map((p, idx) => `
+      <div class="card plan${idx === 1 ? ' popular' : ''}">
+        <div class="p-ic">📶</div>
+        <h2>${esc(p.name)}</h2>
+        <div class="p-feats">
+          <div>حجم: <b>${p.volume_gb == null ? 'نامحدود' : p.volume_gb + ' گیگابایت'}</b></div>
+          <div>زمان: <b>${p.duration_days == null ? 'نامحدود' : p.duration_days + ' روز'}</b></div>
+          <div>تعداد دستگاه: <b>${p.device_limit ?? 2}</b></div>
+        </div>
+        <div class="price">${fmtToman(p.price_toman)} تومان</div>
+        <a class="btn buy" href="/buy/${p.id}">خرید (کارت به کارت)</a>
+      </div>`).join('');
+}
+
+// clean plan listing: the nav «پلن‌ها» link lands straight on the cards, no hero/header
+route('GET', '/plans', async (req, res, { user }) => {
+  const plans = db.prepare('SELECT * FROM plans WHERE active = 1 ORDER BY sort, id').all();
+  send(res, 200, layout('بسته‌های اینترنتی', `<div class="grid" style="padding-top:6px">${planCards(plans)}</div>`, user));
 });
 
 route('GET', '/register', async (req, res, { user, query }) => {
@@ -403,9 +496,10 @@ route('GET', '/orders', async (req, res, { user, query }) => {
       <img class="qr" src="${o.qr_data_url}" alt="QR" width="180" height="180">
       <div class="mut">نام کاربری کانفیگ: <b dir="ltr">${esc((o.sub_url || '').split('/').pop())}</b></div>
       <label style="margin-top:10px">لینک اشتراک (برای اپ‌های V2rayNG / Streisand / ...)</label>
-      <div class="mono">${esc(o.sub_url)}</div>
+      <div class="cp"><code class="mono" id="sub_${o.id}">${esc(o.sub_url)}</code><button type="button" class="btn sm ghost" onclick="vpnCopyEl('sub_${o.id}', this)">📋 کپی</button></div>
       <label style="margin-top:10px">لینک کانفیگ‌ها</label>
-      ${(JSON.parse(o.config_json || '[]')).map((l) => `<div class="mono">${esc(l)}</div>`).join('')}
+      ${(JSON.parse(o.config_json || '[]')).map((l, i) => `<div class="cp"><code class="mono" id="cfg_${o.id}_${i}">${esc(l)}</code><button type="button" class="btn sm ghost" onclick="vpnCopyEl('cfg_${o.id}_${i}', this)">📋 کپی</button></div>`).join('')}
+      <button type="button" class="btn sm" style="margin-top:6px" onclick="vpnCopyAll(${o.id}, this)">📋 کپی همه لینک‌ها (اشتراک + کانفیگ)</button>
     ` : ''}
   </div>`).join('') || '<p>سفارشی ثبت نشده است.</p>'}`;
   send(res, 200, layout('سفارش‌های من', body, user));
@@ -762,6 +856,20 @@ route('POST', '/admin/settings', async (req, res, ctx) => {
   setSetting('card_holder', (b.get('card_holder') || '').trim());
   setSetting('shop_notice', (b.get('shop_notice') || '').trim());
   redirect(res, '/admin/settings?ok=1');
+});
+
+// ---- admin: new-order polling (the admin page calls this every 5 s)
+route('GET', '/api/admin/orders/new', async (req, res, ctx) => {
+  if (!requireAdmin(ctx)) return;
+  const after = parseInt(ctx.query.after || '0', 10) || 0;
+  const rows = db.prepare(`
+    SELECT o.id, o.created_at, o.status, o.client_name, u.username, p.name AS plan_name, p.price_toman
+    FROM orders o
+    JOIN users u ON u.id = o.user_id
+    JOIN plans p ON p.id = o.plan_id
+    WHERE o.id > ? ORDER BY o.id DESC LIMIT 12`).all(after);
+  const awaiting = db.prepare("SELECT COUNT(*) c FROM orders WHERE status='awaiting_review'").get().c;
+  sendJSON(res, 200, { ok: true, max: rows.length ? rows[0].id : after, awaiting, orders: rows });
 });
 
 // ---------------------------------------------------------------- static files
