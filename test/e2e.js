@@ -140,19 +140,24 @@ async function multipart(path, cookie, fields, file) {
   const receiptVisible = adminOrders.includes('data:image/png') || adminOrders.includes('/uploads/receipt_');
   check('receipt image shown to admin', receiptVisible);
 
+  const allIb = JSON.parse(await (await api(`/admin/panels/${panelId}/inbounds`, { cookie: adminCookie })).res.text());
+  check('all-inbounds API returns every mock inbound', allIb.ok && allIb.ids.length === 2);
+
   r = await api(`/admin/orders/${orderId}/approve`, {
     method: 'POST', cookie: adminCookie,
-    form: new URLSearchParams({ panel_id: panelId, inbound_ids: '1' }),
+    form: new URLSearchParams({ panel_id: panelId, inbound_ids: '1, 2' }),
   });
   check('approve POST ok', r.res.status === 302);
 
   const custOrders2 = await (await api('/orders', { cookie: custCookie })).res.text();
   check('order delivered', custOrders2.includes('تحویل شده'));
   check('QR code rendered', custOrders2.includes('data:image/png;base64,'));
-  check('custom username used in sub link', custOrders2.includes('/sub/alireza'));
+  check('account email shown on delivery page', custOrders2.includes('alireza') && custOrders2.includes('نام اکانت کانفیگ'));
+  check('subscription path is random (not the username)', !custOrders2.includes('/sub/alireza') && /\/sub\/[0-9a-f]{20}/.test(custOrders2));
   check('subscription link shown', /http:\/\/127\.0\.0\.1:\d+\/sub\/[A-Za-z0-9_@.-]+/.test(custOrders2));
   check('config link (vless) shown', custOrders2.includes('vless://'));
   check('per-link copy buttons rendered', custOrders2.includes('vpnCopyEl'));
+  check('one config link per chosen inbound (2 links)', (custOrders2.match(/id="cfg_\d+_\d+"/g) || []).length === 2);
   check('copy-all button rendered', custOrders2.includes('کپی همه لینک‌ها'));
   const poll1 = JSON.parse(await (await api('/api/admin/orders/new?after=' + custOrderId, { cookie: adminCookie })).res.text());
   check('no new orders after approval', poll1.orders.length === 0 && poll1.awaiting === 0);
