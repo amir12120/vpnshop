@@ -223,6 +223,26 @@ function vpnCopyAll(orderId, btn){
   }
   vpnCopy(parts.join('\\n'), btn);
 }
+// Admin approve form: fill inbound_ids with ALL inbounds of the selected panel.
+function vpnFillAllInbounds(btn){
+  var form = btn.closest('form'); if (!form) return;
+  var sel = form.querySelector('select[name="panel_id"]');
+  var inp = form.querySelector('input[name="inbound_ids"]');
+  if (!sel || !inp) return;
+  var panelId = sel.value;
+  var old = btn.textContent;
+  btn.disabled = true; btn.textContent = 'در حال خواندن پنل…';
+  var restore = function(){ setTimeout(function(){ btn.disabled = false; btn.textContent = old; }, 2400); };
+  if (!panelId){ inp.value = ''; restore(); return; }
+  fetch('/admin/panels/' + encodeURIComponent(panelId) + '/inbounds', { headers: { Accept: 'application/json' } })
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if (d.ok && d.ids && d.ids.length){ inp.value = d.ids.join(', '); btn.textContent = '✓ هر ' + d.ids.length + ' اینباند انتخاب شد'; }
+      else { btn.textContent = 'خطا: ' + (d.error || 'inbound‌ای یافت نشد'); }
+      restore();
+    })
+    .catch(function(){ btn.textContent = 'خطا در اتصال به پنل'; restore(); });
+}
 </script>`;
 
 // Admin panel: poll every 5 s for brand-new orders and toast the admin on-screen.
@@ -470,7 +490,7 @@ route('POST', '/buy/:planId', async (req, res, { user, params }) => {
 route('GET', '/orders', async (req, res, { user, query }) => {
   if (!user) return redirect(res, '/login');
   const orders = db.prepare(`
-    SELECT o.*, p.name AS plan_name, p.volume_gb, p.duration_days, d.sub_url, d.config_json, d.qr_data_url
+    SELECT o.*, p.name AS plan_name, p.volume_gb, p.duration_days, d.sub_url, d.config_json, d.qr_data_url, d.email AS d_email
     FROM orders o
     JOIN plans p ON p.id = o.plan_id
     LEFT JOIN deliveries d ON d.order_id = o.id
@@ -494,7 +514,7 @@ route('GET', '/orders', async (req, res, { user, query }) => {
     ${o.sub_url ? `
       <h2 style="margin-top:14px">تحویل سفارش</h2>
       <img class="qr" src="${o.qr_data_url}" alt="QR" width="180" height="180">
-      <div class="mut">نام کاربری کانفیگ: <b dir="ltr">${esc((o.sub_url || '').split('/').pop())}</b></div>
+      <div class="mut">نام اکانت کانفیگ (ایمیل): <b dir="ltr">${esc(o.d_email || (o.sub_url || '').split('/').pop())}</b></div>
       <label style="margin-top:10px">لینک اشتراک (برای اپ‌های V2rayNG / Streisand / ...)</label>
       <div class="cp"><code class="mono" id="sub_${o.id}">${esc(o.sub_url)}</code><button type="button" class="btn sm ghost" onclick="vpnCopyEl('sub_${o.id}', this)">📋 کپی</button></div>
       <label style="margin-top:10px">لینک کانفیگ‌ها</label>
@@ -586,6 +606,7 @@ route('GET', '/admin/orders', async (req, res, ctx) => {
         </select>
         <label>Inboundها (با ویرگول جدا کنید؛ خالی = پیش‌فرض پنل/پلن)</label>
         <input name="inbound_ids" placeholder="مثلاً 1,2,3 — چند اینباند مجاز است">
+<div class="row" style="margin:0 0 14px"><button type="button" class="btn sm ghost" onclick="vpnFillAllInbounds(this)">✨ همه Inboundهاي اين پنل را انتخاب کن</button></div>
       </div>
       <div><button class="ok">✓ تأیید و تحویل خودکار</button></div>
     </form>
@@ -626,9 +647,12 @@ async function provisionOrder(order, panelId, inboundIdsRaw) {
   const totalGB = plan.volume_gb == null ? 0 : Math.round(plan.volume_gb * 1024 * 1024 * 1024);
   const expiryTime = plan.duration_days == null ? 0 : Date.now() + plan.duration_days * 24 * 3600 * 1000;
 
+  // The subscription-link path is a RANDOM token, never the customer's
+  // account name/email: the customer only chooses the account (email).
+  const subId = randomToken(10);
   for (let attempt = 1; ; attempt++) {
     try {
-      await client.addClient({ inboundIds: inbounds, email, uuid, totalGB, expiryTime, limitIp: plan.device_limit ?? 2 });
+      await client.addClient({ inboundIds: inbounds, email, uuid, totalGB, expiryTime, limitIp: plan.device_limit ?? 2, subId });
       break; // client created
     } catch (e) {
       const taken = /already in use|already exists|duplicate/i.test(e.message || '');
@@ -636,12 +660,12 @@ async function provisionOrder(order, panelId, inboundIdsRaw) {
       email = `${baseEmail}_${attempt + 1}`; // ali → ali_2
     }
   }
-  const links = await client.getClientLinks({ inboundIds: inbounds, email });
+  const links = await client.getClientLinks({ inboundIds: inbounds, email, subId });
 
-  db.prepare(`INSERT INTO deliveries (order_id, panel_id, sub_url, config_json, qr_data_url)
-              VALUES (?, ?, ?, ?, ?)`).run(
+  db.prepare(`INSERT INTO deliveries (order_id, panel_id, sub_url, config_json, qr_data_url, email, sub_id)
+              VALUES (?, ?, ?, ?, ?, ?, ?)`).run(
     order.id, panel.id, links.subUrl, JSON.stringify(links.links),
-    await QRCode.toDataURL(links.subUrl, { width: 360, margin: 1 }));
+    await QRCode.toDataURL(links.subUrl, { width: 360, margin: 1 }), email, subId);
   db.prepare("UPDATE orders SET status='delivered', reviewed_at=datetime('now'), delivered_at=datetime('now') WHERE id=?").run(order.id);
 }
 
@@ -828,6 +852,25 @@ route('POST', '/admin/panels/:id/delete', async (req, res, ctx) => {
   if (!requireAdmin(ctx)) return;
   db.prepare('DELETE FROM panels WHERE id = ?').run(ctx.params.id);
   redirect(res, '/admin/panels');
+});
+
+// inbounds of a panel, as JSON — powers the «همه Inboundهای این پنل» button
+// in the admin approve form (fills inbound_ids with every available inbound).
+route('GET', '/admin/panels/:id/inbounds', async (req, res, ctx) => {
+  if (!requireAdmin(ctx)) return;
+  const panel = db.prepare('SELECT * FROM panels WHERE id = ?').get(ctx.params.id);
+  if (!panel) return sendJSON(res, 404, { ok: false, error: 'پنل یافت نشد' });
+  const client = new SanayiClient({ baseUrl: panel.base_url, username: panel.username, password: panel.password, apiToken: panel.api_token });
+  try {
+    const rows = await client.listInbounds();
+    sendJSON(res, 200, {
+      ok: true,
+      ids: rows.map((i) => i.id),
+      inbounds: rows.map((i) => ({ id: i.id, remark: i.remark || i.tag || '', port: i.port, protocol: i.protocol })),
+    });
+  } catch (e) {
+    sendJSON(res, 200, { ok: false, error: e.message });
+  }
 });
 
 // ---- admin: shop settings (card number etc.)
