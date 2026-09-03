@@ -121,15 +121,14 @@ const server = http.createServer((req, res) => {
     }
     if (u.pathname === '/panel/api/inbounds/addClient' && req.method === 'POST') {
       const inboundId = params.get('id');
-      if (String(inboundId) !== String(INBOUND.id)) {
+      const ib = INBOUNDS.find((x) => x.id === Number(inboundId));
+      if (!ib) {
         return res.end(JSON.stringify({ success: false, msg: 'inbound not found' }));
       }
       const settings = JSON.parse(params.get('settings') || '{}');
       for (const c of settings.clients || []) {
         clientsBySub[c.subId || c.email] = c;
-        INBOUND.settings = JSON.stringify({
-          clients: [...JSON.parse(INBOUND.settings).clients, c],
-        });
+        ib.settings = JSON.stringify({ clients: [...JSON.parse(ib.settings).clients, c] });
       }
       return res.end(JSON.stringify({ success: true, msg: 'client added', obj: null }));
     }
