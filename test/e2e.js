@@ -162,6 +162,28 @@ async function multipart(path, cookie, fields, file) {
   const poll1 = JSON.parse(await (await api('/api/admin/orders/new?after=' + custOrderId, { cookie: adminCookie })).res.text());
   check('no new orders after approval', poll1.orders.length === 0 && poll1.awaiting === 0);
 
+  console.log('— customer: dashboard + usage charts');
+  const anonDash = await api('/dashboard');
+  check('dashboard redirects anonymous (302)', anonDash.res.status === 302);
+  const dash = await (await api('/dashboard', { cookie: custCookie })).res.text();
+  check('dashboard renders (200 + title)', dash.includes('داشبورد مصرف'));
+  check('sidebar with all sections', dash.includes('href="/dashboard"') && dash.includes('href="/orders"') &&
+    dash.includes('href="/plans"') && dash.includes('href="/account"') && dash.includes('خروج از حساب'));
+  check('dashboard is the active sidebar item', /class="snav on" href="\/dashboard"/.test(dash));
+  check('config count stat = 1', dash.includes('id="vCfg">۱</div>'));
+  check('purchased volume shows 10 گیگ', dash.includes('۱۰ گیگ'));
+  check('config row lists the account email', dash.includes('alireza'));
+
+  const anonApi = await api('/api/user/dashboard?mode=day&live=1');
+  check('live API requires login (401)', anonApi.res.status === 401);
+  const dJson = JSON.parse(await (await api('/api/user/dashboard?mode=day&live=1', { cookie: custCookie })).res.text());
+  check('live API ok + one config', dJson.ok && dJson.stats.configs === 1);
+  check('live row quota equals 10 GiB', dJson.rows.length === 1 && dJson.rows[0].quotaB === 10 * 1073741824);
+  check('meter sampled usage from the panel', dJson.stats.usedB > 0 && dJson.stats.lastSampleTs > 0);
+  check('daily chart has 30 buckets', dJson.chart.points.length === 30 && dJson.chart.mode === 'day');
+  const hJson = JSON.parse(await (await api('/api/user/usage?mode=hour', { cookie: custCookie })).res.text());
+  check('hourly chart has 24 buckets', hJson.ok && hJson.chart.points.length === 24);
+
   console.log('— security: private receipt');
   const receiptPath = (custOrders2.match(/\/uploads\/receipt_[a-z0-9_]+\.png/) || adminOrders.match(/\/uploads\/receipt_[a-z0-9_]+\.png/) || [])[0];
   if (receiptPath) {

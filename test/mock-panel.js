@@ -7,6 +7,21 @@ const http = require('http');
 
 const API_TOKEN = 'mock-api-token-123';
 const clientsBySub = {};   // subId -> { email, uuid }
+const addedAt = {};        // email -> epoch ms (mock usage grows from here)
+// Simulated traffic rate (bytes/second) so charts move during tests/preview.
+const RATE_DOWN = 32768, RATE_UP = 4096; // ≈115 MB/h — charts move visibly
+function mockTraffic(email, c) {
+  const secs = Math.max(0, (Date.now() - (addedAt[email] || Date.now())) / 1000);
+  return {
+    email,
+    up: Math.floor(secs * RATE_UP),
+    down: Math.floor(secs * RATE_DOWN),
+    total: Number(c && c.totalGB) || 0,
+    expiryTime: Number(c && c.expiryTime) || 0,
+    enable: !c || c.enable !== false,
+    subId: (c && c.subId) || '',
+  };
+}
 
 function freshInbound(id, port, remark) {
   return {
@@ -90,6 +105,7 @@ const server = http.createServer((req, res) => {
       }
       const c = { ...client };
       clientsBySub[c.subId || c.email] = c;
+      addedAt[c.email] = Date.now();
       for (const id of inboundIds) {
         const ib = INBOUNDS.find((x) => x.id === id);
         if (!ib) return sendJSON(res, 404, { success: false, msg: `inbound ${id} not found` });
@@ -128,9 +144,18 @@ const server = http.createServer((req, res) => {
       const settings = JSON.parse(params.get('settings') || '{}');
       for (const c of settings.clients || []) {
         clientsBySub[c.subId || c.email] = c;
+        addedAt[c.email] = Date.now();
         ib.settings = JSON.stringify({ clients: [...JSON.parse(ib.settings).clients, c] });
       }
       return res.end(JSON.stringify({ success: true, msg: 'client added', obj: null }));
+    }
+
+    // per-client traffic (3x-ui v3: GET /panel/api/clients/traffic/:email)
+    if (u.pathname.startsWith('/panel/api/clients/traffic/')) {
+      const email = decodeURIComponent(u.pathname.split('/').pop());
+      const c = Object.values(clientsBySub).find((x) => x.email === email);
+      if (!c) return sendJSON(res, 404, { success: false, msg: 'client not found' });
+      return sendJSON(res, 200, { success: true, msg: '', obj: mockTraffic(email, c) });
     }
 
     // mock subscription endpoint
