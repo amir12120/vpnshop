@@ -320,22 +320,27 @@ cmd_ssl() {
     letsencrypt|issue) shift || true; ssl_letsencrypt "$@" ;;
     remove)      ssl_remove ;;
     menu|"")
+      local msg="" rc=0
       while true; do
         echo ""
         box_top
-        box_title "SSL Manager  •  v${VERSION}"
+        box_title "SSL Manager | v${VERSION}"
         box_sep
-        box_row2 "1) Status"                 "2) Install / renew Let's Encrypt"
-        box_row2 "3) Force renew"            "4) Remove SSL (revert to HTTP)"
-        box_center "0) Back to main menu" "$c_dim"
+        box_row2 "📊 1) Status"                 "🔒 2) Install / renew cert"
+        box_row2 "♻️ 3) Force renew"            "🔓 4) Remove SSL (HTTP)"
+        box_center "↩️ 0) Back to main menu" "$c_dim"
         box_bottom
+        [ -n "$msg" ] && echo -e "$msg"
+        dim "  type a number and press Enter  ·  0 = back"
         read -rp "  choice: " a
+        msg=""
         case "$a" in
-          1) ssl_status ;;
-          2) read -rp "domain [$(get_domain)]: " d; ssl_letsencrypt "${d:-$(get_domain)}" ;;
-          3) ssl_renew ;;
-          4) ssl_remove ;;
+          1) ssl_status; rc=$?; msg="$(state_line $rc '📊 [1] SSL Status — certificate info printed above')" ;;
+          2) read -rp "domain [$(get_domain)]: " d; ssl_letsencrypt "${d:-$(get_domain)}"; rc=$?; msg="$(state_line $rc "🔒 [2] Install/renew — HTTPS enabled for ${d:-the domain} (see above)")" ;;
+          3) ssl_renew; rc=$?; msg="$(state_line $rc '♻️ [3] Force renew — certificates renewed (or state shown above)')" ;;
+          4) ssl_remove; rc=$?; msg="$(state_line $rc '🔓 [4] Remove SSL — reverted to plain HTTP (see above)')" ;;
           0) break ;;
+          *) warn "unknown option: $a" ;;
         esac
       done ;;
     *) err "unknown ssl command: $1"; exit 1 ;;
@@ -446,10 +451,27 @@ fill() {  # fill <count> <char> — locale-safe repetition
   while [ "$i" -lt "$n" ]; do out="${out}${ch}"; i=$((i + 1)); done
   printf '%s' "$out"
 }
+disp_w() {  # display width for the box menus: ASCII=1 col, emoji ≈2 cols;
+  # variation selectors (FE0F), ZWJ and keycap marks add 0 — keeps the box
+  # borders aligned when emoji appear inside cells. Pure-bash (no subprocess
+  # per char), so it stays instant on any machine.
+  local s="$1" i n w=0 ch
+  n=${#s}
+  for ((i = 0; i < n; i++)); do
+    ch="${s:i:1}"
+    case "$ch" in
+      [\ -~]) w=$((w + 1)) ;;
+      $'\u200D'|$'\uFE0F'|$'\u20E3') : ;;
+      *) w=$((w + 2)) ;;
+    esac
+  done
+  printf '%s' "$w"
+}
 center_in() {  # center <text> <width> — pads both sides with spaces
-  local t="$1" w="$2" l r
-  l=$(( (w - ${#t}) / 2 )); [ "$l" -lt 0 ] && l=0
-  r=$(( w - ${#t} - l ));   [ "$r" -lt 0 ] && r=0
+  local t="$1" w="$2" dw l r
+  dw=$(disp_w "$t")
+  l=$(( (w - dw) / 2 )); [ "$l" -lt 0 ] && l=0
+  r=$(( w - dw - l ));   [ "$r" -lt 0 ] && r=0
   printf '%*s%s%*s' "$l" '' "$t" "$r" ''
 }
 box_top() {
@@ -470,11 +492,12 @@ box_blank() {
 }
 box_title() {  # box_title <text> [color]
   local w; w=$(twidth)
-  local t="$1" col="${2:-$c_info}" pad
-  pad=$(( (w - 2 - ${#t}) / 2 )); [ "$pad" -lt 0 ] && pad=0
+  local t="$1" col="${2:-$c_info}" pad dw
+  dw=$(disp_w "$t")
+  pad=$(( (w - 2 - dw) / 2 )); [ "$pad" -lt 0 ] && pad=0
   printf "${c_box}║${c_off}%*s" "$pad" ''
   printf "${c_bold}${col}%s${c_off}" "$t"
-  printf "%*s${c_box}║${c_off}\n" "$((w - 2 - pad - ${#t}))" ''
+  printf "%*s${c_box}║${c_off}\n" "$((w - 2 - pad - dw))" ''
 }
 box_row2() {  # two centered cells in one row: box_row2 <left> <right> [<lcolor> <rcolor>]
   local w; w=$(twidth)
@@ -491,6 +514,11 @@ box_center() {  # one centered cell: box_center <text> [color]
 }
 
 # ---------------------------------------------------------------- help / menu
+state_line() {  # state_line <rc> <text-with-emoji> — visible "what was done" state
+  local rc="$1" t="$2"
+  if [ "$rc" -eq 0 ]; then echo -e " ${c_ok}✔${c_off} ${t}"; else echo -e " ${c_bad}✘${c_off} ${t} — failed (see output above)"; fi
+}
+
 usage() {
   cat <<EOF
 vpnshop — management CLI for VPN Config Shop
@@ -521,38 +549,47 @@ vpnshop — management CLI for VPN Config Shop
 EOF
 }
 cmd_menu() {
+  local msg="" rc=0
   while true; do
     echo ""
     box_top
-    box_title "VPN Shop Manager  •  v${VERSION}"
+    box_title "VPN Shop Manager | v${VERSION}"
     box_sep
-    box_row2 "1) Status"                 "8) Admin user"
-    box_row2 "2) Restart"                "9) SSL manager"
-    box_row2 "3) Logs"                   "10) Change port"
-    box_row2 "4) Info / help"            "11) Reset admin password"
-    box_row2 "5) Backup"                 "12) Doctor (panel/tunnel check)"
-    box_row2 "6) Restore"                "13) Ports (tunnel conflict check)"
-    box_row2 "7) Update"                 "14) Re-install (keeps data)"
-    box_row2 "u) Uninstall (FULL)"       "0) Exit" "$c_bad" "$c_dim"
+    box_row2 "📊 1) Status"              "👤 8) Admin user"
+    box_row2 "🔄 2) Restart"             "🔐 9) SSL manager"
+    box_row2 "📜 3) Logs"                "🔌 10) Change port"
+    box_row2 "📖 4) Info / help"         "🔑 11) Reset admin password"
+    box_row2 "💾 5) Backup"              "🩺 12) Doctor (panel/tunnel)"
+    box_row2 "📥 6) Restore"             "🌐 13) Ports (tunnel check)"
+    box_row2 "⬆️ 7) Update"              "🔧 14) Re-install (keeps data)"
+    box_row2 "🗑️ u) Uninstall (FULL)"    "🚪 0) Exit" "$c_bad" "$c_dim"
     box_bottom
+    [ -n "$msg" ] && echo -e "$msg"
     dim "  type a number and press Enter  ·  u = uninstall (FULL removal)  ·  0 = exit"
     read -rp "  choice: " a
+    msg=""
     case "$a" in
-      1) cmd_status ;;  2) cmd_restart ;; 3) read -rp "lines [50]: " n; cmd_logs "${n:-50}" ;;
-      4) usage ;;       5) read -rp "output file [auto]: " f; cmd_backup "${f:-}" ;;
-      6) read -rp "backup file: " f; cmd_restore "$f" ;;
-      7) cmd_update ;;
-      8) read -rp "username: " u; read -rsp "password: " p; echo; cmd_admin "$u" "$p" ;;
-      9) cmd_ssl ;;
-      10) read -rp "new port: " p; cmd_port "$p" ;;
-      11) read -rp "username: " u; read -rsp "new password: " p; echo; cmd_admin "$u" "$p" ;;
-      12) cmd_doctor ;;
-      13) cmd_ports ;;
-      14) cmd_install ;;
-      u) cmd_uninstall ;;
+      1) rc=0; cmd_status  || rc=$?; msg="$(state_line $rc '📊 [1] Status — current service state reported above')" ;;
+      2) rc=0; cmd_restart || rc=$?; msg="$(state_line $rc '🔄 [2] Restart — service was restarted (or stop/start state shown above)')" ;;
+      3) read -rp "lines [50]: " n; rc=0; cmd_logs "${n:-50}" || rc=$?; msg="$(state_line $rc '📜 [3] Logs — last lines printed above')" ;;
+      4) usage; msg="$(state_line 0 '📖 [4] Help — command reference printed above')" ;;
+      5) read -rp "output file [auto]: " f; rc=0; cmd_backup "${f:-}" || rc=$?; msg="$(state_line $rc '💾 [5] Backup — archive created (path printed above)')" ;;
+      6) read -rp "backup file: " f; rc=0; cmd_restore "$f" || rc=$?; msg="$(state_line $rc '📥 [6] Restore — archive applied')" ;;
+      7) rc=0; cmd_update || rc=$?; msg="$(state_line $rc '⬆️ [7] Update — code refreshed and service restarted')" ;;
+      8) read -rp "username: " u; read -rsp "password: " p; echo; rc=0; cmd_admin "$u" "$p" || rc=$?; msg="$(state_line $rc '👤 [8] Admin user — user saved (or password set)')" ;;
+      9) rc=0; cmd_ssl || rc=$?; msg="$(state_line $rc '🔐 [9] SSL manager — finished (use the SSL menu options above)')" ;;
+      10) read -rp "new port: " p; rc=0; cmd_port "$p" || rc=$?; msg="$(state_line $rc '🔌 [10] Port — shop will listen on the chosen port')" ;;
+      11) read -rp "username: " u; read -rsp "new password: " p; echo; rc=0; cmd_admin "$u" "$p" || rc=$?; msg="$(state_line $rc '🔑 [11] Admin password — reset done')" ;;
+      12) rc=0; cmd_doctor || rc=$?; msg="$(state_line $rc '🩺 [12] Doctor — health check completed above')" ;;
+      13) rc=0; cmd_ports  || rc=$?; msg="$(state_line $rc '🌐 [13] Ports — listening ports listed above')" ;;
+      14) rc=0; cmd_install || rc=$?; msg="$(state_line $rc '🔧 [14] Re-install — finished, existing data kept')" ;;
+      u) rc=0; cmd_uninstall || rc=$?; msg="$(state_line $rc '🗑️ [u] Uninstall — finished (details above)')" ;;
       0) break ;;
+      *) warn "unknown option: $a" ;;
     esac
   done
+  echo ""
+  dim "bye 👋"
 }
 
 # ---------------------------------------------------------------- dispatch
