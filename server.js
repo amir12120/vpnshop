@@ -243,6 +243,69 @@ footer.foot{border-top:1px solid var(--line);padding:22px 0 30px;margin-top:40px
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
 .bigico{font-size:40px;text-align:center;padding:26px 0 12px}
 @media(max-width:900px){.acct{grid-template-columns:1fr}.acct aside{position:static;flex-direction:row;overflow-x:auto;gap:6px;padding:9px;align-items:center}.su{display:none}.snav{white-space:nowrap;flex:0 0 auto}.cfgrow .meta{align-items:flex-start}}
+/* ---------- responsive polish: desktop & mobile ---------- */
+html,body{overflow-x:clip}
+img{max-width:100%}
+.wrap,main{padding-inline:16px}
+/* tablet & narrow laptop */
+@media(max-width:1024px){
+  main,.wrap{padding-inline:14px}
+  .acct{grid-template-columns:220px 1fr;gap:16px}
+  .stats{grid-template-columns:repeat(auto-fit,minmax(170px,1fr))}
+}
+@media(max-width:900px){
+  .phead{gap:10px}
+  .stats{grid-template-columns:repeat(auto-fit,minmax(150px,1fr))}
+}
+@media(max-width:760px){
+  h1{font-size:23px}
+  h2{font-size:17px}
+  .hero{padding:24px 0 16px}
+  .hero p{font-size:14px}
+  .card{padding:16px}
+  .stat{padding:13px 14px 12px}
+  .stat .v{font-size:18px}
+  main{margin:16px auto 28px}
+  .cp{flex-wrap:wrap}
+  .cp .mono{flex-basis:100%}
+  .cp button{min-height:42px;padding-inline:18px}
+  .cfgrow{gap:10px}
+  .cfgrow .em{min-width:160px}
+  .bars{height:170px}
+  footer.foot{padding:18px 0 24px}
+}
+@media(max-width:640px){
+  header .wrap.nav{flex-direction:column;align-items:center;gap:8px}
+  header nav{display:flex;flex-wrap:wrap;justify-content:center;align-items:center;column-gap:14px;row-gap:4px}
+  header nav a{margin-inline-start:0}
+  .hero h1{font-size:24px}
+}
+@media(max-width:520px){
+  .hero h1{font-size:21px;line-height:1.55}
+  .grid{grid-template-columns:1fr}
+  .features{grid-template-columns:1fr}
+  .stats{grid-template-columns:repeat(2,1fr);gap:10px}
+  .stat{padding:12px 13px 11px}
+  .stat .ic{margin-bottom:5px}
+  .stat .v{font-size:16px}
+  .stat .l{font-size:10.5px;line-height:1.6}
+  .bars{height:150px;gap:2px}
+  .phead h1{font-size:20px}
+  .seg button{padding:7px 12px;font-size:12px}
+  .cp{flex-direction:column;align-items:stretch}
+  .cp button{width:100%}
+  .snav{padding:10px 12px}
+  .btn.sm{padding:8px 12px}
+  .row{row-gap:8px}
+  #toasts{inset-inline-start:8px;bottom:8px;max-width:calc(100vw - 16px)}
+  th,td{padding:8px 9px}
+}
+@media(max-width:380px){
+  .wrap,main{padding-inline:12px}
+  .hero h1{font-size:19px}
+  .chips span{font-size:11.5px;padding:5px 10px}
+  header nav a{font-size:13px}
+}
 </style>
 </head>
 <body>
