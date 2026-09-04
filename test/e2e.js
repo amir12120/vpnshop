@@ -183,6 +183,10 @@ async function multipart(path, cookie, fields, file) {
   check('daily chart has 30 buckets', dJson.chart.points.length === 30 && dJson.chart.mode === 'day');
   const hJson = JSON.parse(await (await api('/api/user/usage?mode=hour', { cookie: custCookie })).res.text());
   check('hourly chart has 24 buckets', hJson.ok && hJson.chart.points.length === 24);
+  const mJson = JSON.parse(await (await api('/api/user/usage?mode=month', { cookie: custCookie })).res.text());
+  check('monthly chart has 12 calendar buckets', mJson.ok && mJson.chart.points.length === 12);
+  const mLabels = (mJson.chart.points || []).map((p) => p.label);
+  check('monthly labels are unique (no duplicated month)', new Set(mLabels).size === mLabels.length);
 
   console.log('— security: private receipt');
   const receiptPath = (custOrders2.match(/\/uploads\/receipt_[a-z0-9_]+\.png/) || adminOrders.match(/\/uploads\/receipt_[a-z0-9_]+\.png/) || [])[0];
