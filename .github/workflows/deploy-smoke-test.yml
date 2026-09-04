@@ -109,6 +109,8 @@ jobs:
         run: |
           # `vpnshop` with no args must open the interactive menu (regression guard)
           printf '0\n' | sudo vpnshop | grep -q "VPN Shop Manager" && echo "interactive menu opens OK"
+          # 9 = SSL manager submenu, then back (0) and exit (0)
+          printf '9\n0\n0\n' | sudo vpnshop | grep -q "SSL Manager" && echo "SSL submenu opens OK"
           sudo vpnshop status
           sudo vpnshop doctor
           sudo vpnshop ports | head -8
