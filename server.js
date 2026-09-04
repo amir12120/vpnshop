@@ -9,6 +9,7 @@ const { db, getSetting, setSetting } = require('./lib/db');
 const { hashPassword, verifyPassword, makeSession, parseSession, randomToken } = require('./lib/auth');
 const { SanayiClient } = require('./lib/sanayi');
 const meter = require('./lib/meter');
+const jal = require('./lib/jalali');
 
 const PORT = parseInt(process.env.PORT || '3000', 10);
 const PUBLIC_DIR = path.join(__dirname, 'public');
@@ -671,14 +672,26 @@ function userUsageSnapshot(userId) {
 }
 
 // Chart buckets (bytes) for one user + mode, with Persian labels.
+// Hour/day labels come from the bucket's center timestamp; month labels are
+// the actual Jalaali months the (calendar-aligned) buckets represent.
 function usageChartPayload(userId, mode) {
   const s = meter.seriesForUser(userId, mode);
   const fmtH = new Intl.DateTimeFormat('fa-IR', { hour: '2-digit', minute: '2-digit', hour12: false });
   const fmtD = new Intl.DateTimeFormat('fa-IR', { day: 'numeric', month: 'short' });
   const fmtM = new Intl.DateTimeFormat('fa-IR', { month: 'long' });
+  let monthBase = null;
+  if (mode === 'month') {
+    const j0 = jal.tsToJalali(s.start);
+    monthBase = jal.monthIndexOf(j0.jy, j0.jm);
+  }
   const points = s.values.map((bytes, i) => {
-    const center = new Date((s.start + (i + 0.5) * s.size) * 1000);
-    const label = mode === 'hour' ? fmtH.format(center) : mode === 'month' ? fmtM.format(center) : fmtD.format(center);
+    let label;
+    if (mode === 'hour') label = fmtH.format(new Date((s.start + (i + 0.5) * s.size) * 1000));
+    else if (mode === 'month') {
+      // mid-month representative date -> its fa-IR long month name
+      const { jy, jm } = jal.yearMonthOf(monthBase + i);
+      label = fmtM.format(jal.jalaliToDate(jy, jm, 15));
+    } else label = fmtD.format(new Date((s.start + (i + 0.5) * s.size) * 1000));
     return { label, bytes };
   });
   return { mode, points, sampledKeys: s.keys };
