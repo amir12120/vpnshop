@@ -15,7 +15,8 @@ SERVICE="vpnshop"
 NGINX_SITE="/etc/nginx/sites-available/vpnshop"
 NGINX_ENABLED="/etc/nginx/sites-enabled/vpnshop"
 
-c_ok="\033[32m"; c_bad="\033[31m"; c_info="\033[36m"; c_dim="\033[2m"; c_off="\033[0m"
+c_ok="\033[32m"; c_bad="\033[31m"; c_info="\033[36m"; c_dim="\033[2m"
+c_bold="\033[1m"; c_box="\033[1;36m"; c_off="\033[0m"
 ok()   { echo -e " ${c_ok}✔${c_off} $*"; }
 err()  { echo -e " ${c_bad}✘${c_off} $*" >&2; }
 info() { echo -e " ${c_info}➜${c_off} $*"; }
@@ -321,13 +322,14 @@ cmd_ssl() {
     menu|"")
       while true; do
         echo ""
-        echo -e "${c_info}═══ SSL Manager ═══${c_off}"
-        echo " 1) status                      - show certificates & expiry"
-        echo " 2) install/renew Let's Encrypt - enable HTTPS for a domain"
-        echo " 3) force renew                 - renew all certificates now"
-        echo " 4) remove SSL                  - revert to plain HTTP"
-        echo " 0) back"
-        read -rp "choice: " a
+        box_top
+        box_title "SSL Manager  •  v${VERSION}"
+        box_sep
+        box_row2 "1) Status"                 "2) Install / renew Let's Encrypt"
+        box_row2 "3) Force renew"            "4) Remove SSL (revert to HTTP)"
+        box_center "0) Back to main menu" "$c_dim"
+        box_bottom
+        read -rp "  choice: " a
         case "$a" in
           1) ssl_status ;;
           2) read -rp "domain [$(get_domain)]: " d; ssl_letsencrypt "${d:-$(get_domain)}" ;;
@@ -423,6 +425,71 @@ cmd_install() {
   cd "$APP_DIR" && bash INSTALL.sh
 }
 
+# ---------------------------------------------------------------- boxed (graphical) menu
+# Box-drawn, two-column menu rendering. The frame width follows the
+# terminal (clamped 76–140) so rows never wrap on normal SSH sessions.
+twidth() {
+  local w=80
+  if command -v tput >/dev/null 2>&1; then
+    w=$(tput cols 2>/dev/null || echo 80)
+  fi
+  case "$w" in
+    ''|*[!0-9]*) w=80 ;;
+  esac
+  [ "$w" -lt 76 ] && w=76
+  [ "$w" -gt 140 ] && w=140
+  if [ $((w % 2)) -ne 0 ]; then w=$((w - 1)); fi
+  echo "$w"
+}
+fill() {  # fill <count> <char> — locale-safe repetition
+  local n="$1" ch="${2:-═}" out="" i=0
+  while [ "$i" -lt "$n" ]; do out="${out}${ch}"; i=$((i + 1)); done
+  printf '%s' "$out"
+}
+center_in() {  # center <text> <width> — pads both sides with spaces
+  local t="$1" w="$2" l r
+  l=$(( (w - ${#t}) / 2 )); [ "$l" -lt 0 ] && l=0
+  r=$(( w - ${#t} - l ));   [ "$r" -lt 0 ] && r=0
+  printf '%*s%s%*s' "$l" '' "$t" "$r" ''
+}
+box_top() {
+  local w; w=$(twidth)
+  printf "${c_box}╔%s╗${c_off}\n" "$(fill $((w - 2)) ═)"
+}
+box_bottom() {
+  local w; w=$(twidth)
+  printf "${c_box}╚%s╝${c_off}\n" "$(fill $((w - 2)) ═)"
+}
+box_sep() {
+  local w; w=$(twidth)
+  printf "${c_box}╠%s╣${c_off}\n" "$(fill $((w - 2)) ─)"
+}
+box_blank() {
+  local w; w=$(twidth)
+  printf "${c_box}║${c_off}%*s${c_box}║${c_off}\n" "$((w - 2))" ''
+}
+box_title() {  # box_title <text> [color]
+  local w; w=$(twidth)
+  local t="$1" col="${2:-$c_info}" pad
+  pad=$(( (w - 2 - ${#t}) / 2 )); [ "$pad" -lt 0 ] && pad=0
+  printf "${c_box}║${c_off}%*s" "$pad" ''
+  printf "${c_bold}${col}%s${c_off}" "$t"
+  printf "%*s${c_box}║${c_off}\n" "$((w - 2 - pad - ${#t}))" ''
+}
+box_row2() {  # two centered cells in one row: box_row2 <left> <right> [<lcolor> <rcolor>]
+  local w; w=$(twidth)
+  local l="$1" r="$2" lc="${3:-$c_info}" rc="${4:-$c_ok}" C cl cr
+  C=$(( (w - 6) / 2 ))
+  cl=$(center_in "$l" "$C"); cr=$(center_in "$r" "$C")
+  printf "${c_box}║${c_off} ${c_bold}${lc}%s${c_off}  ${c_bold}${rc}%s${c_off} ${c_box}║${c_off}\n" "$cl" "$cr"
+}
+box_center() {  # one centered cell: box_center <text> [color]
+  local w; w=$(twidth)
+  local t="$1" col="${2:-$c_dim}" c
+  c=$(center_in "$t" "$((w - 4))")
+  printf "${c_box}║${c_off} ${c} ${c_box}║${c_off}\n"
+}
+
 # ---------------------------------------------------------------- help / menu
 usage() {
   cat <<EOF
@@ -456,13 +523,20 @@ EOF
 cmd_menu() {
   while true; do
     echo ""
-    echo -e "${c_info}═══ VPN Shop Manager ═══${c_off}"
-    echo " 1) status         5) backup         9)  ssl manager    13) ports"
-    echo " 2) restart        6) restore        10) change port"
-    echo " 3) logs           7) update         11) reset admin password"
-    echo " 4) info/help      8) admin user     12) doctor (tunnel/panel check)"
-    echo " 14) re-install (keeps data)            0) exit  (u = uninstall, full removal)"
-    read -rp "choice: " a
+    box_top
+    box_title "VPN Shop Manager  •  v${VERSION}"
+    box_sep
+    box_row2 "1) Status"                 "8) Admin user"
+    box_row2 "2) Restart"                "9) SSL manager"
+    box_row2 "3) Logs"                   "10) Change port"
+    box_row2 "4) Info / help"            "11) Reset admin password"
+    box_row2 "5) Backup"                 "12) Doctor (panel/tunnel check)"
+    box_row2 "6) Restore"                "13) Ports (tunnel conflict check)"
+    box_row2 "7) Update"                 "14) Re-install (keeps data)"
+    box_row2 "u) Uninstall (FULL)"       "0) Exit" "$c_bad" "$c_dim"
+    box_bottom
+    dim "  type a number and press Enter  ·  u = uninstall (FULL removal)  ·  0 = exit"
+    read -rp "  choice: " a
     case "$a" in
       1) cmd_status ;;  2) cmd_restart ;; 3) read -rp "lines [50]: " n; cmd_logs "${n:-50}" ;;
       4) usage ;;       5) read -rp "output file [auto]: " f; cmd_backup "${f:-}" ;;
