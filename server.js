@@ -8,6 +8,7 @@ const QRCode = require('qrcode');
 const { db, getSetting, setSetting } = require('./lib/db');
 const { hashPassword, verifyPassword, makeSession, parseSession, randomToken } = require('./lib/auth');
 const { SanayiClient } = require('./lib/sanayi');
+const meter = require('./lib/meter');
 
 const PORT = parseInt(process.env.PORT || '3000', 10);
 const PUBLIC_DIR = path.join(__dirname, 'public');
@@ -92,7 +93,7 @@ function route(method, pattern, handler) {
 }
 
 // ---------------------------------------------------------------- views (tiny template helpers)
-const layout = (title, body, user) => `<!doctype html>
+const layout = (title, body, user, wide) => `<!doctype html>
 <html lang="fa" dir="rtl">
 <head>
 <meta charset="utf-8">
@@ -185,6 +186,62 @@ footer.foot{border-top:1px solid var(--line);padding:22px 0 30px;margin-top:40px
 .ntf .ntf-b{font-size:12.5px;color:var(--txt);margin:2px 0 8px}
 .ntf a{font-size:12px;font-weight:700}
 .ntf .ntf-x{position:absolute;top:6px;inset-inline-end:8px;background:none;border:0;color:var(--mut);cursor:pointer;font-size:15px;padding:2px 6px;line-height:1}
+/* ---- customer panel: sidebar shell + dashboard ---- */
+.wide{max-width:1240px}
+.acct{display:grid;grid-template-columns:250px 1fr;gap:22px;align-items:start;margin-top:6px}
+.acct aside{position:sticky;top:84px;background:linear-gradient(180deg,var(--card2),var(--card));border:1px solid var(--line);border-radius:16px;padding:12px 10px;display:flex;flex-direction:column;gap:4px;box-shadow:0 12px 28px rgba(0,0,0,.22)}
+.su{display:flex;align-items:center;gap:11px;padding:6px 8px 13px;border-bottom:1px solid var(--line);margin-bottom:8px}
+.su .av{width:42px;height:42px;flex:0 0 42px;border-radius:12px;background:var(--grad);display:flex;align-items:center;justify-content:center;font-weight:900;font-size:18px;color:#fff;box-shadow:0 6px 14px rgba(79,140,255,.35)}
+.su b{font-size:13.5px;display:block}
+.su small{color:var(--mut);font-size:11px}
+.snav{display:flex;align-items:center;gap:9px;padding:9px 11px;border-radius:10px;color:var(--mut);font-weight:600;font-size:13.5px;transition:all .15s;border:1px solid transparent;text-decoration:none}
+.snav:hover{background:rgba(79,140,255,.08);color:var(--txt)}
+.snav.on{background:linear-gradient(120deg,rgba(79,140,255,.26),rgba(124,92,255,.18));border-color:rgba(79,140,255,.42);color:#fff}
+.snav.on::before{content:'›';margin-inline-end:-2px}
+.snav.out{margin-top:6px;color:var(--bad)}
+.acct-main{min-width:0}
+.phead{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin:0 0 16px}
+.phead h1{margin:0;font-size:23px}
+.phead .sub{color:var(--mut);font-size:12.5px;margin-top:2px}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px;margin-bottom:18px}
+.stat{background:linear-gradient(180deg,var(--card2),var(--card));border:1px solid var(--line);border-radius:15px;padding:15px 17px 13px;position:relative;overflow:hidden}
+.stat::before{content:'';position:absolute;top:0;inset-inline-start:0;inset-inline-end:0;height:3px;background:var(--grad)}
+.stat .ic{font-size:19px;margin-bottom:7px}
+.stat .v{font-size:20px;font-weight:900;background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent;line-height:1.3}
+.stat .l{color:var(--mut);font-size:12px;margin-top:2px}
+.seg{display:inline-flex;background:#0c1220;border:1px solid var(--line);border-radius:11px;padding:3px;gap:3px}
+.seg button{border:0;background:transparent;color:var(--mut);padding:6px 16px;border-radius:8px;cursor:pointer;font-weight:800;font-size:12.5px;font-family:inherit;transition:all .15s}
+.seg button.on{background:var(--grad);color:#fff}
+.bars{display:flex;align-items:flex-end;gap:3px;height:185px;margin:16px 2px 0}
+.bcol{flex:1;min-width:0;height:100%;display:flex;align-items:flex-end;cursor:pointer;position:relative}
+.bfill{width:100%;min-height:2px;background:linear-gradient(180deg,rgba(53,208,208,.95),rgba(79,140,255,.85) 45%,rgba(124,92,255,.9));border-radius:6px 6px 2px 2px;transition:height .5s ease}
+.bcol:hover .bfill{filter:brightness(1.3)}
+.bcol .tip{position:absolute;bottom:calc(100% + 7px);inset-inline-start:50%;transform:translateX(50%);background:#0b111f;border:1px solid var(--line);color:var(--txt);font-size:11px;padding:3px 9px;border-radius:7px;white-space:nowrap;opacity:0;pointer-events:none;z-index:5;box-shadow:0 6px 16px rgba(0,0,0,.4)}
+.bcol:hover .tip{opacity:1}
+.blab{display:flex;gap:3px;color:var(--mut);font-size:10px;margin-top:7px}
+.blab span{flex:1;text-align:center;overflow:hidden;white-space:nowrap;padding-inline:1px}
+.chartfoot{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;color:var(--mut);font-size:12px;margin-top:10px}
+.bar{height:8px;background:#0c1220;border:1px solid var(--line);border-radius:20px;overflow:hidden}
+.bar i{display:block;height:100%;background:var(--grad);border-radius:20px;transition:width .5s}
+.bar.warn i{background:linear-gradient(90deg,#f5b942,#ff8a3d)}
+.bar.danger i{background:linear-gradient(90deg,#d64545,#ff5c5c)}
+.cfgrow{display:flex;align-items:center;gap:16px;flex-wrap:wrap;padding:14px 2px;border-bottom:1px solid var(--line)}
+.cfgrow:last-child{border-bottom:0}
+.cfgrow .em{min-width:190px;flex:1.1}
+.cfgrow .em b{direction:ltr;display:block;text-align:left;font-family:Consolas,'Cascadia Code',monospace;font-size:12.5px;word-break:break-all}
+.cfgrow .em small{color:var(--mut);font-size:11px}
+.cfgrow .meter{min-width:230px;flex:2}
+.cfgrow .meta{min-width:120px;display:flex;flex-direction:column;gap:6px;align-items:flex-end}
+.mrow{display:flex;justify-content:space-between;font-size:11.5px;color:var(--mut);margin-bottom:5px}
+.mrow b{color:var(--txt)}
+.chip{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:20px;background:rgba(79,140,255,.14);color:#8fb8ff;border:1px solid rgba(79,140,255,.3);white-space:nowrap}
+.chip.red{background:rgba(255,92,92,.13);color:#ff9b9b;border-color:rgba(255,92,92,.32)}
+.chip.green{background:rgba(46,204,113,.13);color:#7fe8ae;border-color:rgba(46,204,113,.32)}
+.chip.gold{background:rgba(245,185,66,.13);color:#ffd97a;border-color:rgba(245,185,66,.32)}
+.liveDot{width:8px;height:8px;border-radius:50%;background:#2ecc71;display:inline-block;margin-inline-end:7px;animation:pulse 2s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+.bigico{font-size:40px;text-align:center;padding:26px 0 12px}
+@media(max-width:900px){.acct{grid-template-columns:1fr}.acct aside{position:static;flex-direction:row;overflow-x:auto;gap:6px;padding:9px;align-items:center}.su{display:none}.snav{white-space:nowrap;flex:0 0 auto}.cfgrow .meta{align-items:flex-start}}
 </style>
 </head>
 <body>
@@ -193,11 +250,11 @@ footer.foot{border-top:1px solid var(--line);padding:22px 0 30px;margin-top:40px
     <a class="brand" href="/">🛒 VPN<span>Shop</span></a>
     <nav>
       <a href="/plans">پلن‌ها</a>
-      ${user ? `<a href="/orders">سفارش‌های من</a>${user.role === 'admin' ? '<a href="/admin">پنل مدیریت<span id="pendCount" class="pend" hidden></span></a>' : ''}<a href="/logout" class="btn ghost sm">خروج (${esc(user.username)})</a>` : `<a href="/login">ورود</a><a href="/register" class="btn sm">عضویت</a>`}
+      ${user ? `<a href="/dashboard">پنل کاربری</a>${user.role === 'admin' ? '<a href="/admin">پنل مدیریت<span id="pendCount" class="pend" hidden></span></a>' : ''}<a href="/logout" class="btn ghost sm">خروج (${esc(user.username)})</a>` : `<a href="/login">ورود</a><a href="/register" class="btn sm">عضویت</a>`}
     </nav>
   </div>
 </header>
-<main>${body}</main>
+<main${wide ? ' class="wide"' : ''}>${body}</main>
 <footer class="foot"><div class="wrap">🛒 فروشگاه VPN — پرداخت کارت به کارت · تحویل خودکار کانفیگ و لینک اشتراک</div></footer>
 <div id="toasts"></div>
 ${GLOBAL_JS}${user && user.role === 'admin' ? ADMIN_JS : ''}
@@ -525,7 +582,347 @@ route('GET', '/orders', async (req, res, { user, query }) => {
       <button type="button" class="btn sm" style="margin-top:6px" onclick="vpnCopyAll(${o.id}, this)">📋 کپی همه لینک‌ها (اشتراک + کانفیگ)</button>
     ` : ''}
   </div>`).join('') || '<p>سفارشی ثبت نشده است.</p>'}`;
-  send(res, 200, layout('سفارش‌های من', body, user));
+  send(res, 200, panelShell(user, 'سفارش‌ها و کانفیگ‌ها', 'orders', body));
+});
+
+// ---------------------------------------------------------------- USER PANEL
+const MODE_FA = { hour: 'ساعتی', day: 'روزانه', month: 'ماهانه' };
+const MODE_WINDOW_FA = { hour: '۲۴ ساعت گذشته', day: '۳۰ روز گذشته', month: '۱۲ ماه گذشته' };
+const faN = (x, d = 2) => Number(x || 0).toLocaleString('fa-IR', { maximumFractionDigits: d });
+const GIB = 1073741824; // panels account volume in GiB — keep display in sync
+const gbTxt = (bytes) => (bytes > 0 ? faN(bytes / GIB) + ' گیگ' : '۰ گیگ');
+const fmtDT = (ts) => ts ? new Intl.DateTimeFormat('fa-IR', { day: 'numeric', month: 'short', year: 'numeric' }).format(new Date(ts)) : '—';
+
+// Sidebar shell wrapping every customer-panel page.
+function panelShell(user, title, activeKey, inner) {
+  const nav = [
+    { k: 'dashboard', href: '/dashboard', ico: '📊', label: 'داشبورد' },
+    { k: 'orders', href: '/orders', ico: '📦', label: 'سفارش‌ها و کانفیگ‌ها' },
+    { k: 'buy', href: '/plans', ico: '🛒', label: 'خرید بسته جدید' },
+    { k: 'account', href: '/account', ico: '👤', label: 'پروفایل' },
+  ];
+  if (user.role === 'admin') nav.push({ k: 'admin', href: '/admin', ico: '⚙️', label: 'پنل مدیریت' });
+  const items = nav.map((n) =>
+    `<a class="snav${n.k === activeKey ? ' on' : ''}" href="${n.href}"><span>${n.ico}</span>${n.label}</a>`).join('');
+  const body = `
+  <div class="acct">
+    <aside>
+      <div class="su">
+        <div class="av">${esc(String(user.username || '?').slice(0, 1).toUpperCase())}</div>
+        <div style="min-width:0"><b>${esc(user.username)}</b><small>${user.role === 'admin' ? 'مدیر فروشگاه' : 'مشتری'}</small></div>
+      </div>
+      ${items}
+      <a class="snav out" href="/logout"><span>🚪</span>خروج از حساب</a>
+    </aside>
+    <section class="acct-main">${inner}</section>
+  </div>`;
+  return layout(title, body, user, true);
+}
+
+// Aggregate everything the dashboard needs: distinct config accounts of the
+// user, usage from the latest meter sample per account, order summaries and
+// the connected panels. Cheap (DB + in-memory cache) — safe for SSR.
+function userUsageSnapshot(userId) {
+  const rows = db.prepare(`
+    SELECT d.panel_id, d.email, d.sub_url, d.order_id, d.sub_id,
+           p.name AS plan_name, p.volume_gb, p.duration_days,
+           pan.name AS panel_name
+    FROM deliveries d
+    JOIN orders o ON o.id = d.order_id
+    JOIN plans p ON p.id = o.plan_id
+    JOIN panels pan ON pan.id = d.panel_id
+    WHERE o.user_id = ? AND d.email IS NOT NULL AND d.email != ''
+    ORDER BY d.id`).all(userId);
+  const byKey = new Map();
+  for (const r of rows) byKey.set(`${r.panel_id}\u0000${r.email}`, r); // renewal: newest row wins
+
+  const configs = [];
+  let purchasedB = 0, usedB = 0, remainB = 0, unlimited = 0, lastSample = 0;
+  for (const r of byKey.values()) {
+    const st = meter.lastState(r.panel_id, r.email);
+    const used = st ? st.up + st.down : 0;
+    const quota = st && st.total > 0 ? st.total : (r.volume_gb == null ? 0 : Math.round(r.volume_gb * GIB));
+    usedB += used;
+    if (quota <= 0) { unlimited++; } else { purchasedB += quota; remainB += Math.max(0, quota - used); }
+    if (st && st.ts > lastSample) lastSample = st.ts;
+    configs.push({
+      orderId: r.order_id, email: r.email, subUrl: r.sub_url,
+      panel: r.panel_name, plan: r.plan_name,
+      usedB: used, quotaB: quota,
+      pct: quota > 0 ? Math.min(100, (used / quota) * 100) : 0,
+      unlimitedQuota: quota <= 0,
+      expiryTs: st && st.expiryTime ? st.expiryTime : null,
+      enabled: st ? st.enable : null,
+      lastTs: st ? st.ts : null,
+    });
+  }
+  const orders = db.prepare('SELECT status, COUNT(*) AS c FROM orders WHERE user_id = ? GROUP BY status').all(userId);
+  const awaiting = (orders.find((x) => x.status === 'awaiting_review') || {}).c || 0;
+  const deliveredOrders = (orders.find((x) => x.status === 'delivered') || {}).c || 0;
+  return {
+    configs,
+    configCount: byKey.size,
+    awaiting, deliveredOrders,
+    purchasedB, usedB, remainB,   // bytes
+    unlimited,
+    panels: db.prepare('SELECT name FROM panels ORDER BY id').all().map((x) => x.name),
+    lastSampleTs: lastSample || null,
+  };
+}
+
+// Chart buckets (bytes) for one user + mode, with Persian labels.
+function usageChartPayload(userId, mode) {
+  const s = meter.seriesForUser(userId, mode);
+  const fmtH = new Intl.DateTimeFormat('fa-IR', { hour: '2-digit', minute: '2-digit', hour12: false });
+  const fmtD = new Intl.DateTimeFormat('fa-IR', { day: 'numeric', month: 'short' });
+  const fmtM = new Intl.DateTimeFormat('fa-IR', { month: 'long' });
+  const points = s.values.map((bytes, i) => {
+    const center = new Date((s.start + (i + 0.5) * s.size) * 1000);
+    const label = mode === 'hour' ? fmtH.format(center) : mode === 'month' ? fmtM.format(center) : fmtD.format(center);
+    return { label, bytes };
+  });
+  return { mode, points, sampledKeys: s.keys };
+}
+
+function cfgRowsHTML(cfg) {
+  if (!cfg.length) {
+    return `<div class="bigico">🌱</div>
+      <p class="mutl" style="text-align:center">هنوز کانفیگی تحویل نشده است. اولین بسته را بخرید تا کانفیگ شما اینجا همراه با نمودار مصرف نمایش داده شود.</p>
+      <p style="text-align:center"><a class="btn" href="/plans">مشاهده بسته‌ها و خرید</a></p>`;
+  }
+  return cfg.map((c) => {
+    const expired = c.expiryTs && c.expiryTs < Date.now();
+    let chip;
+    if (expired) chip = '<span class="chip red">⛔ منقضی شده</span>';
+    else if (c.enabled === false) chip = '<span class="chip red">⛔ غیرفعال</span>';
+    else if (!c.unlimitedQuota && c.pct >= 90) chip = '<span class="chip gold">⚠ نزدیک اتمام</span>';
+    else chip = '<span class="chip green">● فعال</span>';
+    const barCls = c.unlimitedQuota ? '' : c.pct >= 100 ? ' danger' : c.pct >= 90 ? ' warn' : '';
+    const w = c.unlimitedQuota ? 100 : Math.max(2, Math.min(100, c.pct));
+    const remainTxt = c.unlimitedQuota ? 'نامحدود' : gbTxt(Math.max(0, c.quotaB - c.usedB));
+    return `<div class="cfgrow">
+      <div class="em"><b>${esc(c.email)}</b><small>${esc(c.plan)} · ${esc(c.panel)} · سفارش #${c.orderId}</small></div>
+      <div class="meter">
+        <div class="mrow"><span>مصرف: <b>${gbTxt(c.usedB)}</b> از ${c.unlimitedQuota ? 'نامحدود' : gbTxt(c.quotaB)}</span><span>باقی‌مانده: <b>${remainTxt}</b></span></div>
+        <div class="bar${barCls}"><i style="width:${w}%"></i></div>
+      </div>
+      <div class="meta">${chip}
+        <small class="mutl">${c.expiryTs ? 'انقضا: ' + fmtDT(c.expiryTs) : 'بدون انقضا'}</small>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function dashboardInner(user, snap, chartDay) {
+  const awaitingBanner = snap.awaiting
+    ? `<div class="msg" style="border-color:rgba(245,185,66,.4);background:rgba(245,185,66,.08);color:#ffd97a">⏳ <b>${faN(snap.awaiting)}</b> سفارش در انتظار تأیید مدیر است — <a href="/orders">مشاهده و پیگیری</a></div>`
+    : '';
+  const panelsTxt = snap.panels.length ? snap.panels.map(esc).join('، ') : '—';
+  return `
+  <div class="phead">
+    <div>
+      <h1>داشبورد مصرف</h1>
+      <div class="sub">وضعیت کلی کانفیگ‌ها، حجم و مصرف شما</div>
+    </div>
+    <div class="row">
+      <div class="seg" id="seg">
+        <button data-mode="hour" onclick="load('hour',false)">ساعتی</button>
+        <button data-mode="day" onclick="load('day',false)">روزانه</button>
+        <button data-mode="month" onclick="load('month',false)">ماهانه</button>
+      </div>
+      <button class="btn sm ghost" id="liveBtn" onclick="DASH.live()">🔄 بروزرسانی زنده</button>
+    </div>
+  </div>
+  ${awaitingBanner}
+  <div class="stats">
+    <div class="stat"><div class="ic">📦</div><div class="v" id="vCfg">${faN(snap.configCount)}</div><div class="l">کانفیگ‌های خریداری‌شده</div></div>
+    <div class="stat"><div class="ic">📥</div><div class="v" id="vUsed">${gbTxt(snap.usedB)}</div><div class="l">کل مصرف (دانلود + آپلود)</div></div>
+    <div class="stat"><div class="ic">💾</div><div class="v" id="vBuy">${gbTxt(snap.purchasedB)}${snap.unlimited ? ' <span class="chip">نامحدود</span>' : ''}</div><div class="l">کل حجم خریداری‌شده</div></div>
+    <div class="stat"><div class="ic">✅</div><div class="v" id="vLeft">${snap.unlimited ? 'نامحدود' : gbTxt(snap.remainB)}</div><div class="l">حجم باقی‌مانده</div></div>
+  </div>
+  <div class="card">
+    <div class="row" style="justify-content:space-between">
+      <h2 style="margin:0">📈 نمودار مصرف</h2><span class="mutl" id="chartWin">${MODE_WINDOW_FA[chartDay.mode]}</span>
+    </div>
+    <div class="bars" id="chartBox"></div>
+    <div class="blab" id="chartLab"></div>
+    <div class="chartfoot"><span id="chartSum"></span><span class="mutl" id="liveInfo"></span></div>
+  </div>
+  <div class="card">
+    <div class="row" style="justify-content:space-between">
+      <h2 style="margin:0">🔌 کانفیگ‌های شما</h2>
+      <a class="btn sm ghost" href="/plans">+ خرید بسته جدید</a>
+    </div>
+    <div id="cfgRows">${cfgRowsHTML(snap.configs)}</div>
+  </div>
+  <p class="mutl">پنل‌های سنایی متصل: <b>${panelsTxt}</b></p>
+  <script>var CHART0 = ${JSON.stringify(chartDay)};</script>
+  ${USER_JS}`;
+}
+
+// Dashboard + account client behaviour: draws the chart, swaps its mode, and
+// live-refreshes usage from the panels (meter records a fresh sample each time).
+const USER_JS = `<script>
+var DASH = { mode: 'day' };
+function faNum(x, d){ return Number(x||0).toLocaleString('fa-IR',{ maximumFractionDigits: d==null?2:d }); }
+function gbS(bytes){ var g = Number(bytes||0)/1073741824; return faNum(g, g>=10?1:2)+' گیگ'; }
+function escS(s){ return String(s==null?'':s).replace(/[&<>"']/g, function(c){
+  return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]); }); }
+function setSeg(mode){
+  var btns = document.querySelectorAll('#seg button');
+  for (var i=0;i<btns.length;i++){ btns[i].className = btns[i].getAttribute('data-mode')===mode ? 'on' : ''; }
+}
+function drawChart(ch){
+  var box = document.getElementById('chartBox'); if (!box) return;
+  var pts = (ch && ch.points) || [];
+  var win = document.getElementById('chartWin');
+  if (win) win.textContent = {hour:'۲۴ ساعت گذشته', day:'۳۰ روز گذشته', month:'۱۲ ماه گذشته'}[ch.mode] || '';
+  if (!pts.length){
+    box.innerHTML = '<p class="mutl" style="width:100%;text-align:center;margin:auto">هنوز داده‌ای ثبت نشده — چند دقیقه پس از استفاده از کانفیگ، نمودار ظاهر می‌شود.</p>';
+    var s2 = document.getElementById('chartSum'); if (s2) s2.textContent = '';
+    var bl = document.getElementById('chartLab'); if (bl) bl.innerHTML = '';
+    return;
+  }
+  var max = 1, total = 0;
+  pts.forEach(function(p){ if (p.bytes > max) max = p.bytes; total += p.bytes; });
+  var step = Math.ceil(pts.length/12);
+  var html = '', lab = '';
+  pts.forEach(function(p, i){
+    var h = p.bytes > 0 ? Math.max(3, p.bytes/max*100) : 0;
+    html += '<div class="bcol"><span class="tip">' + escS(p.label) + ' — ' + gbS(p.bytes) + '</span><i class="bfill" style="height:' + h + '%"></i></div>';
+    lab += '<span>' + ((i % step === 0 || i === pts.length-1) ? escS(p.label) : '') + '</span>';
+  });
+  box.innerHTML = html;
+  var bl = document.getElementById('chartLab'); if (bl) bl.innerHTML = lab;
+  var s = document.getElementById('chartSum');
+  if (s) s.innerHTML = total > 0 ? 'مجموع این بازه: <b>' + gbS(total) + '</b>' : '';
+}
+function setStat(id, html){ var e = document.getElementById(id); if (e) e.innerHTML = html; }
+function mkRows(rows){
+  if (!rows || !rows.length) return '<p class="mutl" style="text-align:center">هنوز کانفیگی تحویل نشده است.</p>';
+  var h = '';
+  rows.forEach(function(c){
+    var expired = c.expiryTs && c.expiryTs < Date.now();
+    var chip = expired ? '<span class="chip red">⛔ منقضی شده</span>'
+      : c.enabled === false ? '<span class="chip red">⛔ غیرفعال</span>'
+      : (!c.unlimitedQuota && c.pct >= 90) ? '<span class="chip gold">⚠ نزدیک اتمام</span>'
+      : '<span class="chip green">● فعال</span>';
+    var barCls = c.unlimitedQuota ? '' : c.pct >= 100 ? ' danger' : c.pct >= 90 ? ' warn' : '';
+    var w = c.unlimitedQuota ? 100 : Math.max(2, Math.min(100, c.pct));
+    h += '<div class="cfgrow"><div class="em"><b>' + escS(c.email) + '</b><small>' + escS(c.plan) + ' · ' + escS(c.panel) + '</small></div>' +
+      '<div class="meter"><div class="mrow"><span>مصرف: <b>' + gbS(c.usedB) + '</b></span></div>' +
+      '<div class="bar' + barCls + '"><i style="width:' + w + '%"></i></div></div>' +
+      '<div class="meta">' + chip + '</div></div>';
+  });
+  return h;
+}
+function apply(p){
+  if (!p || !p.ok) return;
+  var st = p.stats;
+  setStat('vCfg', faNum(st.configs));
+  setStat('vUsed', gbS(st.usedB));
+  setStat('vBuy', gbS(st.purchasedB) + (st.unlimited ? ' <span class="chip">نامحدود</span>' : ''));
+  setStat('vLeft', st.unlimited ? 'نامحدود' : gbS(st.remainB));
+  var rows = document.getElementById('cfgRows'); if (rows) rows.innerHTML = mkRows(p.rows);
+  var info = document.getElementById('liveInfo');
+  if (info) info.innerHTML = st.lastSampleTs
+    ? '<span class="liveDot"></span>آخرین بروزرسانی: ' + new Date(st.lastSampleTs*1000).toLocaleString('fa-IR')
+    : '<span class="liveDot"></span>متر مصرف فعال است';
+  drawChart(p.chart);
+}
+function load(mode, live){
+  DASH.mode = mode; setSeg(mode);
+  return fetch('/api/user/dashboard?mode=' + encodeURIComponent(mode) + (live ? '&live=1' : ''), { headers: { Accept: 'application/json' } })
+    .then(function(r){ return r.json(); })
+    .then(apply)
+    .catch(function(){});
+}
+DASH.live = function(){
+  var b = document.getElementById('liveBtn');
+  if (b){ b.disabled = true; b.textContent = 'در حال دریافت…'; }
+  return load(DASH.mode, true).then(function(){ if (b){ b.disabled = false; b.textContent = '🔄 بروزرسانی زنده'; } });
+};
+(function boot(){
+  drawChart(CHART0);
+  setSeg('day');
+  load('day', false);
+  setTimeout(function(){ if (!document.hidden && location.search.indexOf('demo') === -1) load(DASH.mode, true); }, 1800);
+})();
+</script>`;
+
+route('GET', '/dashboard', async (req, res, ctx) => {
+  const { user } = ctx;
+  if (!user) return redirect(res, '/login');
+  const snap = userUsageSnapshot(user.id);
+  const chart = usageChartPayload(user.id, 'day');
+  send(res, 200, panelShell(user, 'داشبورد مصرف', 'dashboard', dashboardInner(user, snap, chart)));
+});
+
+route('GET', '/account', async (req, res, ctx) => {
+  const { user, query } = ctx;
+  if (!user) return redirect(res, '/login');
+  const msgs = query.ok ? `<div class="msg ok">✓ ${esc(query.ok)}</div>` : query.err ? `<div class="msg err">⚠ ${esc(query.err)}</div>` : '';
+  const inner = `
+  <div class="phead"><div><h1>پروفایل</h1><div class="sub">اطلاعات حساب و تغییر رمز ورود</div></div></div>
+  ${msgs}
+  <div class="card" style="max-width:600px">
+    <h2>👤 ${esc(user.username)}</h2>
+    <p class="mutl">نقش: ${user.role === 'admin' ? 'مدیر فروشگاه' : 'مشتری'} · عضو از ${esc(String(user.created_at || '').slice(0, 10))}</p>
+    <form method="post" action="/account/password" style="margin-top:8px">
+      <label>رمز فعلی</label>
+      <input type="password" name="current_password" required autocomplete="current-password">
+      <div class="row">
+        <div style="flex:1;min-width:200px"><label>رمز جدید (حداقل ۶ کاراکتر)</label>
+          <input type="password" name="new_password" minlength="6" required autocomplete="new-password"></div>
+        <div style="flex:1;min-width:200px"><label>تکرار رمز جدید</label>
+          <input type="password" name="confirm_password" required autocomplete="new-password"></div>
+      </div>
+      <button class="btn ok">🔑 ذخیره رمز جدید</button>
+    </form>
+  </div>`;
+  send(res, 200, panelShell(user, 'پروفایل', 'account', inner));
+});
+
+route('POST', '/account/password', async (req, res, ctx) => {
+  if (!ctx.user) return redirect(res, '/login');
+  const b = new URLSearchParams((await readBody(req)).toString());
+  const cur = b.get('current_password') || '';
+  const nw = b.get('new_password') || '';
+  const conf = b.get('confirm_password') || '';
+  const back = (msg, ok) => redirect(res, `/account?${ok ? 'ok' : 'err'}=` + encodeURIComponent(msg));
+  if (!verifyPassword(ctx.user.password_hash, cur)) return back('رمز فعلی اشتباه است', false);
+  if (nw.length < 6) return back('رمز جدید باید حداقل ۶ کاراکتر باشد', false);
+  if (nw !== conf) return back('تکرار رمز جدید مطابقت ندارد', false);
+  db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hashPassword(nw), ctx.user.id);
+  back('رمز ورود با موفقیت تغییر کرد', true);
+});
+
+// Live payload for the dashboard: optionally re-samples the panels first, so
+// opening the page (or pressing the button) fetches truly current numbers.
+route('GET', '/api/user/dashboard', async (req, res, ctx) => {
+  const { user, query } = ctx;
+  if (!user) return sendJSON(res, 401, { error: 'login required' });
+  const mode = MODE_FA[query.mode] ? query.mode : 'day';
+  if (query.live === '1') await meter.refreshForUser(user.id);
+  const snap = userUsageSnapshot(user.id);
+  sendJSON(res, 200, {
+    ok: true, mode,
+    stats: {
+      configs: snap.configCount, deliveredOrders: snap.deliveredOrders, awaiting: snap.awaiting,
+      purchasedB: snap.purchasedB, usedB: snap.usedB, remainB: snap.remainB,
+      unlimited: snap.unlimited, panels: snap.panels, lastSampleTs: snap.lastSampleTs,
+    },
+    rows: snap.configs,
+    chart: usageChartPayload(user.id, mode),
+  });
+});
+
+// Chart-only payload (no live panel refresh) — the mode switch uses this so
+// browsing the periods never hammers the panels.
+route('GET', '/api/user/usage', async (req, res, ctx) => {
+  if (!ctx.user) return sendJSON(res, 401, { error: 'login required' });
+  const mode = MODE_FA[ctx.query.mode] ? ctx.query.mode : 'day';
+  sendJSON(res, 200, { ok: true, mode, chart: usageChartPayload(ctx.user.id, mode) });
 });
 
 // ---------------------------------------------------------------- ADMIN
@@ -976,3 +1373,21 @@ const HOST = process.env.HOST || '0.0.0.0';
 server.listen(PORT, HOST, () => {
   console.log(`VPN shop listening on ${HOST}:${PORT}`);
 });
+
+// Traffic meter: sample our delivered clients on the connected Sanayi panels
+// on an interval so the dashboard charts accumulate real usage over time.
+// Panels without delivered clients are skipped; interval is tuneable through
+// the meter_interval_s setting (seconds, default 120, min 30).
+let meterTimer = null;
+async function meterLoop() {
+  try {
+    await meter.refreshAll();
+  } catch (e) {
+    console.error('[meter]', e.message);
+  }
+  const sec = Math.max(30, parseInt(getSetting('meter_interval_s', '120'), 10) || 120);
+  meterTimer = setTimeout(meterLoop, sec * 1000);
+}
+// METER_ENABLED=0 disables background polling entirely (dashboard visits still
+// refresh on demand unless ?demo=1 is used for a static preview).
+if (process.env.METER_ENABLED !== '0') meterLoop();
