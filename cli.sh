@@ -23,6 +23,7 @@ APP_DIR="${VPN_SHOP_APP_DIR:-/opt/vpnshop}"
 
 c_ok="\033[32m"; c_bad="\033[31m"; c_acc="\033[36m"; c_acc2="\033[35m"
 c_dim="\033[2m"; c_bold="\033[1m"; c_off="\033[0m"
+c_box="\033[1;36m"   # box frame color for the graphical menu
 
 ok()    { echo -e " ${c_ok}✔${c_off} $*"; }
 err()   { echo -e " ${c_bad}✘${c_off} $*" >&2; }
@@ -30,6 +31,59 @@ info()  { echo -e " ${c_acc}➜${c_off} $*"; }
 warn()  { echo -e " ${c_bad}⚠${c_off} $*"; }
 dim()   { echo -e " ${c_dim}$*${c_off}"; }
 hr()    { echo -e "${c_dim}──────────────────────────────────────────────${c_off}"; }
+
+# ---------------------------------------------------------------- boxed menu helpers
+twidth() {
+  local w=80
+  if command -v tput >/dev/null 2>&1; then
+    w=$(tput cols 2>/dev/null || echo 80)
+  fi
+  case "$w" in
+    ''|*[!0-9]*) w=80 ;;
+  esac
+  [ "$w" -lt 76 ] && w=76
+  [ "$w" -gt 140 ] && w=140
+  if [ $((w % 2)) -ne 0 ]; then w=$((w - 1)); fi
+  echo "$w"
+}
+fill() {  # fill <count> <char> — locale-safe repetition
+  local n="$1" ch="${2:-═}" out="" i=0
+  while [ "$i" -lt "$n" ]; do out="${out}${ch}"; i=$((i + 1)); done
+  printf '%s' "$out"
+}
+center_in() {  # center <text> <width> — pads both sides with spaces
+  local t="$1" w="$2" l r
+  l=$(( (w - ${#t}) / 2 )); [ "$l" -lt 0 ] && l=0
+  r=$(( w - ${#t} - l ));   [ "$r" -lt 0 ] && r=0
+  printf '%*s%s%*s' "$l" '' "$t" "$r" ''
+}
+box_top() {
+  local w; w=$(twidth)
+  printf "${c_box}╔%s╗${c_off}\n" "$(fill $((w - 2)) ═)"
+}
+box_bottom() {
+  local w; w=$(twidth)
+  printf "${c_box}╚%s╝${c_off}\n" "$(fill $((w - 2)) ═)"
+}
+box_sep() {
+  local w; w=$(twidth)
+  printf "${c_box}╠%s╣${c_off}\n" "$(fill $((w - 2)) ─)"
+}
+box_title() {  # box_title <text> [color]
+  local w; w=$(twidth)
+  local t="$1" col="${2:-$c_acc}" pad
+  pad=$(( (w - 2 - ${#t}) / 2 )); [ "$pad" -lt 0 ] && pad=0
+  printf "${c_box}║${c_off}%*s" "$pad" ''
+  printf "${c_bold}${col}%s${c_off}" "$t"
+  printf "%*s${c_box}║${c_off}\n" "$((w - 2 - pad - ${#t}))" ''
+}
+box_row2() {  # two centered cells: box_row2 <left> <right> [<lcolor> <rcolor>]
+  local w; w=$(twidth)
+  local l="$1" r="$2" lc="${3:-$c_acc}" rc="${4:-$c_ok}" C cl cr
+  C=$(( (w - 6) / 2 ))
+  cl=$(center_in "$l" "$C"); cr=$(center_in "$r" "$C")
+  printf "${c_box}║${c_off} ${c_bold}${lc}%s${c_off}  ${c_bold}${rc}%s${c_off} ${c_box}║${c_off}\n" "$cl" "$cr"
+}
 
 cli_installed() { command -v vpnshop >/dev/null 2>&1; }
 
@@ -90,17 +144,16 @@ banner() {
 menu() {
   while true; do
     banner
-    echo -e " ${c_bold}1)${c_off}  ${c_acc}Install${c_off}            install the shop on this server (domain / port / admin)"
-    echo -e " ${c_bold}2)${c_off}  Update               pull the latest version from GitHub & restart"
-    echo -e " ${c_bold}3)${c_off}  ${c_acc}SSL manager${c_off}        Let's Encrypt, renewal, status, remove"
-    echo -e " ${c_bold}4)${c_off}  Status               service, endpoints (https://Domain:Port), disk"
-    echo -e " ${c_bold}5)${c_off}  Doctor               health check: DB, panels/tunnel, uploads, CLI"
-    echo -e " ${c_bold}6)${c_off}  Ports                list listening ports (tunnel conflict check)"
-    echo -e " ${c_bold}7)${c_off}  Backup / Restore     database + receipts + configs"
-    echo -e " ${c_bold}8)${c_off}  Admin user           create / reset admin username & password"
-    echo -e " ${c_bold}9)${c_off}  ${c_bad}Uninstall${c_off}          FULL removal incl. database (asks first; --keep-data keeps files)"
-    echo -e " ${c_bold}0)${c_off}  Exit"
-    hr
+    box_top
+    box_title "VPN Shop Installer & Manager"
+    box_sep
+    box_row2 "1) Install"           "6) Ports"
+    box_row2 "2) Update"            "7) Backup / Restore"
+    box_row2 "3) SSL manager"       "8) Admin user"
+    box_row2 "4) Status"            "9) Uninstall (FULL)" "$c_acc" "$c_bad"
+    box_row2 "5) Doctor"            "0) Exit" "$c_acc" "$c_dim"
+    box_bottom
+    dim "  1 installs the shop · type a number and press Enter · 0 = exit"
     read -rp "  choice: " a
     case "$a" in
       1|i|install)          run_install ;;
