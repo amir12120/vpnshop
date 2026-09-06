@@ -171,10 +171,21 @@ fi
 # internal app port: node listens here; nginx (if domain) takes the public port
 if [ -n "${DOMAIN}" ]; then
   NODE_PORT=$((PORT + 1))
+  # node runs as the unprivileged www-data user — it cannot bind ports <1024,
+  # so the internal port must never land in the privileged range.
+  [ "${NODE_PORT}" -lt 1024 ] && NODE_PORT=1024
   while [ "${NODE_PORT}" -le 65535 ] && port_busy "${NODE_PORT}"; do NODE_PORT=$((NODE_PORT + 1)); done
   [ "${NODE_PORT}" -le 65535 ] || { echo "!! no free internal port next to ${PORT}"; exit 1; }
 else
   NODE_PORT=${PORT}
+  # no domain: node serves the public port itself — as www-data it cannot
+  # bind a privileged port, so reject those up front with a clear message.
+  if [ "${NODE_PORT}" -lt 1024 ]; then
+    echo "!! Port ${NODE_PORT} is privileged (<1024)."
+    echo "   The shop service runs as the unprivileged 'www-data' user and cannot bind it."
+    echo "   Pick a port >= 1024 (e.g. 8443)."
+    exit 1
+  fi
 fi
 
 # ---------- system dependencies ----------
@@ -257,6 +268,8 @@ if [ -z "$SHOP_UP" ]; then
   journalctl -u vpnshop -n 25 --no-pager || true
   echo ""
   echo "   Common causes:"
+  echo "   - 'EACCES ... listen 127.0.0.1:<port below 1024>' -> privileged internal port (old"
+  echo "     install). Re-run the installer — it now picks an unprivileged internal port"
   echo "   - 'No such built-in module: node:sqlite' -> Node too old (need 22.5+). Fix:"
   echo "       curl -fsSL https://deb.nodesource.com/setup_24.x | bash - && apt-get install -y nodejs && systemctl restart vpnshop"
   echo "   - 'port ${NODE_PORT} is already in use'    -> pick another port and reinstall"

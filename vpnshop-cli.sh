@@ -156,6 +156,12 @@ cmd_admin() {
 cmd_port() {
   need_root
   local p="${1:-}"; [[ "$p" =~ ^[0-9]+$ ]] || { err "usage: vpnshop port <new-public-port>"; exit 1; }
+  # IP:PORT mode: node serves the port itself as the unprivileged www-data
+  # user — it cannot bind privileged ports, so reject them here too.
+  if ! { [ -f "$NGINX_SITE" ] && [ -n "$(get_domain)" ]; } && [ "$p" -lt 1024 ]; then
+    err "port ${p} is privileged (<1024) — the service runs as www-data and cannot bind it. Pick a port >= 1024."
+    exit 1
+  fi
   if [ -f "$NGINX_SITE" ] && [ -n "$(get_domain)" ]; then
     # domain mode: the user-chosen port is nginx's public listener
     local old; old=$(get_public_port)
