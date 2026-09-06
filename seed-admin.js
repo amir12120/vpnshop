@@ -13,7 +13,7 @@ if (password.length < 8) {
   console.error('admin password must be at least 8 characters');
   process.exit(1);
 }
-const existing = db.prepare('SELECT id FROM users WHERE username = ?').get(username);
+const existing = db.prepare('SELECT id FROM users WHERE LOWER(username) = LOWER(?)').get(username);
 if (existing) {
   db.prepare("UPDATE users SET password_hash = ?, role = 'admin' WHERE id = ?").run(hashPassword(password), existing.id);
   console.log(`admin '${username}' password updated`);

@@ -102,17 +102,28 @@ async function multipart(path, cookie, fields, file) {
     method: 'POST', cookie: adminCookie,
     form: new URLSearchParams({ card_number: '6037-9911-1234-5678', card_holder: 'تست فروشگاه', shop_notice: '' }),
   });
+  const settingsPage = await (await api('/admin/settings?ok=' + encodeURIComponent('تنظیمات ذخیره شد'), { cookie: adminCookie })).res.text();
+  check('admin settings renders saved feedback', settingsPage.includes('تنظیمات ذخیره شد'));
 
   console.log('— customer: register → buy → upload receipt');
   r = await api('/register', { method: 'POST', form: new URLSearchParams({ username: 'cust1', password: 'custpass123' }) });
   const custCookie = r.cookie;
   check('customer registered & logged in', !!custCookie);
 
+  // case-insensitive username: logout → login with different case still works
+  await api('/logout', { cookie: custCookie });
+  r = await api('/login', { method: 'POST', form: new URLSearchParams({ username: 'CUST1', password: 'custpass123' }) });
+  check('login works with different username case', r.res.status === 302 && String(r.res.headers.get('location') || '').startsWith('/'));
+
   const buyPage = await (await api(`/buy/${planId}`, { cookie: custCookie })).res.text();
   check('buy page shows card number', buyPage.includes('6037-9911-1234-5678'));
 
   r = await multipart(`/buy/${planId}`, custCookie, { note: 'کارت ۴۲۴۲', client_name: 'alireza' }, { field: 'receipt', buf: png });
   check('receipt upload accepted', r.status === 302);
+
+  // duplicate protection: same pending plan order must be rejected
+  r = await multipart(`/buy/${planId}`, custCookie, { note: 'تکرار', client_name: 'alireza' }, { field: 'receipt', buf: png });
+  check('duplicate pending buy rejected', String(r.headers.get('location') || '').includes('/orders?err='));
 
   const ordersPage = await (await api('/orders', { cookie: custCookie })).res.text();
   check('order shows awaiting_review', ordersPage.includes('در انتظار تأیید مدیر'));
@@ -189,8 +200,9 @@ async function multipart(path, cookie, fields, file) {
   check('monthly labels are unique (no duplicated month)', new Set(mLabels).size === mLabels.length);
 
   console.log('— custom-quantity selling (خرید به مقدار دلخواه)');
-  // disabled by default: page hidden, nav hidden
-  check('/custom 404 while disabled', (await api('/custom', { cookie: custCookie })).res.status === 404);
+  // disabled by default: friendly page, promo card hidden
+  const customOff = await (await api('/custom', { cookie: custCookie })).res.text();
+  check('/custom friendly page while disabled', customOff.includes('فعال نشده') && customOff.includes('خرید به مقدار دلخواه'));
   const custHome0 = await (await api('/plans', { cookie: custCookie })).res.text();
   check('custom promo hidden while disabled', !custHome0.includes('خرید کانفیگ به مقدار دلخواه'));
 
@@ -218,6 +230,11 @@ async function multipart(path, cookie, fields, file) {
   // 20 GB → 100,000 toman invoice, custom client name
   r = await multipart('/custom', cust2Cookie, { gb: '20', days: '', client_name: 'mycustom', note: 'کارت ۷۷۷۷' }, { field: 'receipt', buf: png });
   check('custom order accepted', r.status === 302);
+
+  // duplicate protection: second pending custom request must be rejected
+  r = await multipart('/custom', cust2Cookie, { gb: '20', days: '', client_name: 'mycustom', note: 'تکرار' }, { field: 'receipt', buf: png });
+  check('duplicate pending custom rejected', String(r.headers.get('location') || '').includes('/orders?err='));
+
   const cust2Orders = await (await api('/orders', { cookie: cust2Cookie })).res.text();
   check('custom order shown with volume + invoice', cust2Orders.includes('کانفیگ دلخواه (20 گیگ)') && cust2Orders.includes('۱۰۰٬۰۰۰'));
 
@@ -246,7 +263,8 @@ async function multipart(path, cookie, fields, file) {
     form: new URLSearchParams({ custom_price_per_gb: '0', custom_duration_enabled: '0' }),
   });
   check('custom settings disabled', r.res.status === 302);
-  check('/custom 404 again after disable', (await api('/custom', { cookie: cust2Cookie })).res.status === 404);
+  const customOff2 = await (await api('/custom', { cookie: cust2Cookie })).res.text();
+  check('/custom friendly page again after disable', customOff2.includes('فعال نشده'));
 
   console.log('— security: private receipt');
   const receiptPath = (custOrders2.match(/\/uploads\/receipt_[a-z0-9_]+\.png/) || adminOrders.match(/\/uploads\/receipt_[a-z0-9_]+\.png/) || [])[0];

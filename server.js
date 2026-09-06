@@ -314,7 +314,7 @@ img{max-width:100%}
     <a class="brand" href="/">🛒 VPN<span>Shop</span></a>
     <nav>
       <a href="/plans">پلن‌ها</a>
-      ${user && customEnabled() ? '<a href="/custom">خرید دلخواه</a>' : ''}
+      ${user ? '<a href="/custom">خرید دلخواه</a>' : ''}
       ${user ? `<a href="/dashboard">پنل کاربری</a>${user.role === 'admin' ? '<a href="/admin">پنل مدیریت<span id="pendCount" class="pend" hidden></span></a>' : ''}<a href="/logout" class="btn ghost sm">خروج (${esc(user.username)})</a>` : `<a href="/login">ورود</a><a href="/register" class="btn sm">عضویت</a>`}
     </nav>
   </div>
@@ -500,7 +500,8 @@ route('POST', '/register', async (req, res) => {
   const username = (b.get('username') || '').trim();
   const password = b.get('password') || '';
   if (username.length < 3 || password.length < 6) return redirect(res, '/register?err=' + encodeURIComponent('نام کاربری یا رمز عبور کوتاه است'));
-  const exists = db.prepare('SELECT id FROM users WHERE username = ?').get(username);
+  // case-insensitive uniqueness: "Ali" and "ali" are the same account
+  const exists = db.prepare('SELECT id FROM users WHERE LOWER(username) = LOWER(?)').get(username);
   if (exists) return redirect(res, '/register?err=' + encodeURIComponent('این نام کاربری قبلاً ثبت شده است'));
   const info = db.prepare('INSERT INTO users (username, password_hash) VALUES (?, ?)').run(username, hashPassword(password));
   const userId = Number(info.lastInsertRowid);
@@ -525,7 +526,9 @@ route('GET', '/login', async (req, res, { user, query }) => {
 
 route('POST', '/login', async (req, res) => {
   const b = new URLSearchParams((await readBody(req)).toString());
-  const u = db.prepare('SELECT * FROM users WHERE username = ?').get((b.get('username') || '').trim());
+  // case-insensitive username match (mobile keyboards auto-capitalize, emails
+  // get retyped with different case — the same account must still log in)
+  const u = db.prepare('SELECT * FROM users WHERE LOWER(username) = LOWER(?)').get((b.get('username') || '').trim());
   if (!u || !verifyPassword(b.get('password') || '', u.password_hash)) {
     await new Promise((r) => setTimeout(r, 800)); // slow down brute force
     return redirect(res, '/login?err=' + encodeURIComponent('نام کاربری یا رمز عبور اشتباه است'));
@@ -566,7 +569,7 @@ route('GET', '/buy/:planId', async (req, res, { user, params, query }) => {
   </div>
   <div class="card">
     <h2>مرحله ۲ — ارسال فیش واریزی</h2>
-    <form method="post" action="/buy/${plan.id}" enctype="multipart/form-data">
+    <form method="post" action="/buy/${plan.id}" enctype="multipart/form-data" onsubmit="var b=this.querySelector('button');if(b.disabled)return false;b.disabled=true;b.textContent='در حال ارسال فیش…';">
       <label>تصویر فیش واریزی (jpg / png / webp — حداکثر ۸ مگابایت)</label>
       <input type="file" name="receipt" accept="image/*" required>
       <label>نام کاربری دلخواه برای کانفیگ (اختیاری — مثلاً alireza یا alireza@mail.com)</label>
@@ -620,6 +623,11 @@ route('POST', '/buy/:planId', async (req, res, { user, params }) => {
   }
   if (!receiptPath) return redirect(res, `/buy/${plan.id}?err=` + encodeURIComponent('تصویر فیش الزامی است'));
 
+  // duplicate protection: a second click must not create a second order while
+  // an identical request is already awaiting the admin's review
+  const dup = db.prepare("SELECT id FROM orders WHERE user_id = ? AND plan_id = ? AND status = 'awaiting_review'").get(user.id, plan.id);
+  if (dup) return redirect(res, '/orders?err=' + encodeURIComponent('شما قبلاً درخواستی برای این بسته ثبت کرده‌اید و در انتظار تأیید مدیر است.'));
+
   const cleanName = sanitizeClientName(clientName);
   db.prepare(`INSERT INTO orders (user_id, plan_id, status, receipt_path, receipt_note, client_name)
               VALUES (?, ?, 'awaiting_review', ?, ?, ?)`).run(user.id, plan.id, receiptPath, note.trim() || null, cleanName || null);
@@ -650,7 +658,10 @@ function customQuote(volumeGB, days) {
 
 route('GET', '/custom', async (req, res, { user, query }) => {
   if (!user) return redirect(res, '/login');
-  if (!customEnabled()) return send(res, 404, layout('۴۰۴', '<p>صفحه یافت نشد.</p>', user));
+  if (!customEnabled()) return send(res, 200, layout('خرید به مقدار دلخواه', `
+  <h1>🧮 خرید کانفیگ به مقدار دلخواه</h1>
+  <div class="msg err">این روش فروش هنوز توسط مدیر فعال نشده است — قیمت هر گیگ ترافیک در «پنل مدیریت ← تنظیمات فروشگاه» تعیین می‌شود.</div>
+  <p class="mut">تا آن زمان می‌توانید از <a href="/plans">بسته‌های آماده</a> استفاده کنید.</p>`, user));
   const perGB = customPricePerGB();
   const durOn = customDurationEnabled();
   const body = `
@@ -698,6 +709,11 @@ route('GET', '/custom', async (req, res, { user, query }) => {
     </form>
   </div>
   <script>
+  document.querySelector('form[action="/custom"]').addEventListener('submit', function (e) {
+    var b = this.querySelector('button');
+    if (b.disabled) { e.preventDefault(); return; }
+    b.disabled = true; b.textContent = 'در حال ارسال فیش…';
+  });
   var VPN_PER_GB = ${perGB};
   var VPN_DUR_ON = ${durOn ? 'true' : 'false'};
   function fa(n){ return Number(n||0).toLocaleString('fa-IR'); }
@@ -724,7 +740,7 @@ route('GET', '/custom', async (req, res, { user, query }) => {
 
 route('POST', '/custom', async (req, res, { user }) => {
   if (!user) return redirect(res, '/login');
-  if (!customEnabled()) return send(res, 404, layout('۴۰۴', '<p>صفحه یافت نشد.</p>', user));
+  if (!customEnabled()) return redirect(res, '/custom'); // friendly 'not activated' page
   const back = (msg) => '/custom?err=' + encodeURIComponent(msg);
 
   const body = await readBody(req, 12 * 1024 * 1024);
@@ -785,6 +801,9 @@ route('POST', '/custom', async (req, res, { user }) => {
     customPlan = db.prepare('SELECT * FROM plans WHERE id = ?').get(info.lastInsertRowid);
   }
 
+  const dup = db.prepare("SELECT id FROM orders WHERE user_id = ? AND plan_id = ? AND status = 'awaiting_review'").get(user.id, customPlan.id);
+  if (dup) return redirect(res, '/orders?err=' + encodeURIComponent('شما قبلاً درخواست مقدار دلخواه ثبت کرده‌اید و در انتظار تأیید مدیر است.'));
+
   const cleanName = sanitizeClientName(clientName);
   db.prepare(`INSERT INTO orders (user_id, plan_id, status, receipt_path, receipt_note, client_name, volume_gb, duration_days, price_toman)
               VALUES (?, ?, 'awaiting_review', ?, ?, ?, ?, ?, ?)`)
@@ -807,6 +826,7 @@ route('GET', '/orders', async (req, res, { user, query }) => {
   const body = `
   <h1>سفارش‌های من</h1>
   ${query.ok ? `<div class="msg ok">${esc(query.ok)}</div>` : ''}
+  ${query.err ? `<div class="msg err">${esc(query.err)}</div>` : ''}
   ${orders.map((o) => `
   <div class="card">
     <div class="row" style="justify-content:space-between">
@@ -844,7 +864,7 @@ function panelShell(user, title, activeKey, inner) {
     { k: 'dashboard', href: '/dashboard', ico: '📊', label: 'داشبورد' },
     { k: 'orders', href: '/orders', ico: '📦', label: 'سفارش‌ها و کانفیگ‌ها' },
     { k: 'buy', href: '/plans', ico: '🛒', label: 'خرید بسته جدید' },
-    ...(customEnabled() ? [{ k: 'custom', href: '/custom', ico: '🧮', label: 'خرید به مقدار دلخواه' }] : []),
+    { k: 'custom', href: '/custom', ico: '🧮', label: 'خرید به مقدار دلخواه' },
     { k: 'account', href: '/account', ico: '👤', label: 'پروفایل' },
   ];
   if (user.role === 'admin') nav.push({ k: 'admin', href: '/admin', ico: '⚙️', label: 'پنل مدیریت' });
@@ -1542,6 +1562,8 @@ route('GET', '/admin/settings', async (req, res, ctx) => {
   if (!requireAdmin(ctx)) return;
   const body = `
   <h1>تنظیمات فروشگاه</h1>
+  ${ctx.query.ok ? `<div class="msg ok">${esc(ctx.query.ok)}</div>` : ''}
+  ${ctx.query.err ? `<div class="msg err">${esc(ctx.query.err)}</div>` : ''}
   <div class="card">
     <form method="post" action="/admin/settings">
       <label>شماره کارت برای واریز کارت به کارت</label>
@@ -1554,7 +1576,7 @@ route('GET', '/admin/settings', async (req, res, ctx) => {
     </form>
   </div>
   <div class="card">
-    <h2>🧮 فروش به مقدار دلخواه (قیمت هر گیگ)</h2>
+    <h2>🧮 فروش به مقدار دلخواه (قیمت هر گیگ) — ${customPricePerGB() > 0 ? '<span style="color:#2ecc71">✅ فعال</span>' : '<span style="color:#e74c3c">⛔ خاموش</span>'}</h2>
     <p class="mut">به‌جای (یا در کنار) بسته‌های ثابت، به مشتری اجازه دهید هر مقدار ترافیک دلخواه را سفارش دهد. قیمت هر گیگ ترافیک ماهانه را اینجا تعیین کنید؛ مثلاً <b>۵۰۰۰</b> یعنی سفارش ۲۰ گیگ = فاکتور ۱۰۰٫۰۰۰ تومان. <b>۰ یا خالی = این روش فروش خاموش است</b> و صفحه «خرید به مقدار دلخواه» مخفی می‌شود.</p>
     <form method="post" action="/admin/settings/custom">
       <div class="row">
@@ -1578,7 +1600,7 @@ route('POST', '/admin/settings', async (req, res, ctx) => {
   setSetting('card_number', (b.get('card_number') || '').trim());
   setSetting('card_holder', (b.get('card_holder') || '').trim());
   setSetting('shop_notice', (b.get('shop_notice') || '').trim());
-  redirect(res, '/admin/settings?ok=1');
+  redirect(res, '/admin/settings?ok=' + encodeURIComponent('شماره کارت و تنظیمات فروشگاه ذخیره شد.'));
 });
 
 // admin: custom-quantity selling (price per GB + optional custom duration)
