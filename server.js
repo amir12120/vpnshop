@@ -314,6 +314,7 @@ img{max-width:100%}
     <a class="brand" href="/">🛒 VPN<span>Shop</span></a>
     <nav>
       <a href="/plans">پلن‌ها</a>
+      ${user && customEnabled() ? '<a href="/custom">خرید دلخواه</a>' : ''}
       ${user ? `<a href="/dashboard">پنل کاربری</a>${user.role === 'admin' ? '<a href="/admin">پنل مدیریت<span id="pendCount" class="pend" hidden></span></a>' : ''}<a href="/logout" class="btn ghost sm">خروج (${esc(user.username)})</a>` : `<a href="/login">ورود</a><a href="/register" class="btn sm">عضویت</a>`}
     </nav>
   </div>
@@ -388,7 +389,7 @@ const ADMIN_JS = `<script>
       var o = list[i];
       html += '<div class="ntf"><button class="ntf-x" onclick="this.parentNode.remove()" title="بستن">✕</button>' +
         '<div class="ntf-t">🛎 سفارش جدید #' + o.id + '</div>' +
-        '<div class="ntf-b">' + esc(o.username) + ' — ' + esc(o.plan_name) + '</div>' +
+        '<div class="ntf-b">' + esc(o.username) + ' — ' + (o.plan_name === '__custom__' ? 'کانفیگ دلخواه ' + (o.volume_gb || '?') + ' گیگ' : esc(o.plan_name)) + '</div>' +
         '<a href="/admin/orders?status=awaiting_review">بررسی و تحویل</a></div>';
     }
     host.insertAdjacentHTML('beforeend', html);
@@ -432,6 +433,11 @@ route('GET', '/', async (req, res, { user }) => {
   <section class="plans" id="plans">
     <h2>بسته‌های اینترنتی</h2>
     <div class="grid">${planCards(plans)}</div>
+    ${user && customEnabled() ? `<div class="card" style="margin-top:18px;border-style:dashed;text-align:center">
+      <h2>🧮 حجم دلخواه می‌خواهید؟</h2>
+      <p class="mut">هر گیگ ترافیک ماهانه ${fmtToman(customPricePerGB())} تومان — هر مقداری که لازم دارید سفارش دهید.</p>
+      <a class="btn buy" href="/custom">خرید کانفیگ به مقدار دلخواه</a>
+    </div>` : ''}
   </section>
 
   <section class="steps">
@@ -466,7 +472,12 @@ function planCards(plans) {
 // clean plan listing: the nav «پلن‌ها» link lands straight on the cards, no hero/header
 route('GET', '/plans', async (req, res, { user }) => {
   const plans = db.prepare('SELECT * FROM plans WHERE active = 1 ORDER BY sort, id').all();
-  send(res, 200, layout('بسته‌های اینترنتی', `<div class="grid" style="padding-top:6px">${planCards(plans)}</div>`, user));
+  const promo = user && customEnabled() ? `<div class="card" style="margin-top:18px;border-style:dashed;text-align:center">
+      <h2>🧮 حجم دلخواه می‌خواهید؟</h2>
+      <p class="mut">هر گیگ ترافیک ماهانه ${fmtToman(customPricePerGB())} تومان — هر مقداری که لازم دارید سفارش دهید.</p>
+      <a class="btn buy" href="/custom">خرید کانفیگ به مقدار دلخواه</a>
+    </div>` : '';
+  send(res, 200, layout('بسته‌های اینترنتی', `<div class="grid" style="padding-top:6px">${planCards(plans)}</div>${promo}`, user));
 });
 
 route('GET', '/register', async (req, res, { user, query }) => {
@@ -615,10 +626,179 @@ route('POST', '/buy/:planId', async (req, res, { user, params }) => {
   redirect(res, '/orders?ok=' + encodeURIComponent('سفارش ثبت شد. پس از تأیید مدیر، کانفیگ‌ها تحویل داده می‌شود.'));
 });
 
+// ---------------- CUSTOM-QUANTITY BUY FLOW (خرید به مقدار دلخواه) ----------
+// The admin defines a per-GB monthly price in shop settings. The customer
+// enters any volume in GB (+ optional custom duration in days); an invoice
+// of volume × per-GB price is issued on the fly and flows through the same
+// card-to-card → receipt → admin approval pipeline as plan orders.
+// Pricing: floor(volume_gb) × per-GB price × (days / 30). Custom orders are
+// stored as orders on a hidden auto plan so every existing code path
+// (meter, dashboard, admin) keeps working unchanged.
+function customEnabled() {
+  return Number(getSetting('custom_price_per_gb', '0'), 10) > 0;
+}
+function customDurationEnabled() {
+  return (getSetting('custom_duration_enabled', '0') || '0') === '1';
+}
+function customPricePerGB() {
+  return parseInt(getSetting('custom_price_per_gb', '0'), 10) || 0;
+}
+function customQuote(volumeGB, days) {
+  const total = Math.floor(volumeGB) * customPricePerGB();
+  return Math.round(total * (days / 30));
+}
+
+route('GET', '/custom', async (req, res, { user, query }) => {
+  if (!user) return redirect(res, '/login');
+  if (!customEnabled()) return send(res, 404, layout('۴۰۴', '<p>صفحه یافت نشد.</p>', user));
+  const perGB = customPricePerGB();
+  const durOn = customDurationEnabled();
+  const body = `
+  <h1>🧮 خرید کانفیگ به مقدار دلخواه</h1>
+  <p class="mut">هر گیگ ترافیک ماهانه ${fmtToman(perGB)} تومان — هر مقداری که لازم دارید سفارش دهید؛ پس از تأیید مدیر، کانفیگ با همان حجم و نام دلخواه شما ساخته و تحویل می‌شود.</p>
+  ${query.err ? `<div class="msg err">${esc(query.err)}</div>` : ''}
+  <div class="card">
+    <h2>۱ — مقدار ترافیک و مدت</h2>
+    <div class="row">
+      <div style="flex:1;min-width:200px"><label>حجم ترافیک (گیگابایت — عدد صحیح)</label>
+      <input id="gb" type="number" min="1" step="1" value="20" oninput="vpnQuote()"></div>
+      ${durOn ? `
+      <div style="flex:1;min-width:200px"><label>مدت (روز — خالی = ۳۰ روز)</label>
+      <input id="days" type="number" min="1" step="1" placeholder="30" oninput="vpnQuote()"></div>` : ''}
+    </div>
+    <div class="card" style="background:#0f1420;margin-top:12px">
+      <div id="quote">حجم را وارد کنید…</div>
+    </div>
+  </div>
+  <div class="card">
+    <h2>۲ — واریز کارت به کارت</h2>
+    ${(() => {
+      const cardNumber = getSetting('card_number', '');
+      const cardHolder = getSetting('card_holder', '');
+      return cardNumber ? `
+      <p>مبلغ فاکتور را به کارت زیر واریز کنید:</p>
+      <div class="card" style="background:#0f1420">
+        <div class="mono" id="cardno">${esc(cardNumber)}</div>
+        <p class="mut">به نام: ${esc(cardHolder || '—')}</p>
+      </div>` : `<div class="msg err">شماره کارت توسط مدیر تنظیم نشده است. با پشتیبانی تماس بگیرید.</div>`;
+    })()}
+  </div>
+  <div class="card">
+    <h2>۳ — ارسال فیش واریزی</h2>
+    <form method="post" action="/custom" enctype="multipart/form-data">
+      <input type="hidden" name="gb" id="gb_hidden" value="20">
+      ${durOn ? '<input type="hidden" name="days" id="days_hidden" value="">' : ''}
+      <label>تصویر فیش واریزی (jpg / png / webp — حداکثر ۸ مگابایت)</label>
+      <input type="file" name="receipt" accept="image/*" required>
+      <label>نام کاربری دلخواه برای کانفیگ (اختیاری — مثلاً alireza یا alireza@mail.com)</label>
+      <input name="client_name" placeholder="اگر خالی بگذارید، خودکار ساخته می‌شود">
+      <label>توضیح (اختیاری — مثلاً ۴ رقم آخر کارت واریزکننده)</label>
+      <input name="note">
+      <button>ثبت سفارش و ارسال فیش</button>
+    </form>
+  </div>
+  <script>
+  var VPN_PER_GB = ${perGB};
+  var VPN_DUR_ON = ${durOn ? 'true' : 'false'};
+  function fa(n){ return Number(n||0).toLocaleString('fa-IR'); }
+  function vpnQuote(){
+    var gb = Math.max(0, Math.floor(Number(document.getElementById('gb').value) || 0));
+    var days = 30;
+    if (VPN_DUR_ON && document.getElementById('days')) {
+      var dv = Number(document.getElementById('days').value);
+      days = (dv > 0) ? Math.floor(dv) : 30;
+    }
+    document.getElementById('gb_hidden').value = gb || '';
+    if (VPN_DUR_ON && document.getElementById('days_hidden')) document.getElementById('days_hidden').value = days === 30 ? '' : days;
+    var q = document.getElementById('quote');
+    if (!gb) { q.innerHTML = 'حجم را وارد کنید…'; return; }
+    var total = Math.round(gb * VPN_PER_GB * (days / 30));
+    q.innerHTML = '<b>' + fa(gb) + '</b> گیگ ' + (days !== 30 ? '<b>' + fa(days) + '</b> روزه' : 'یک‌ماهه') +
+      ' — فاکتور: <b style="font-size:1.4em">' + fa(total) + ' تومان</b>' +
+      '<div class="mut" style="margin-top:4px">' + fa(gb) + ' گیگ × ' + fa(VPN_PER_GB) + ' تومان' + (days !== 30 ? ' × ' + fa(days) + '/۳۰' : '') + '</div>';
+  }
+  vpnQuote();
+  </script>`;
+  send(res, 200, layout('خرید به مقدار دلخواه', body, user));
+});
+
+route('POST', '/custom', async (req, res, { user }) => {
+  if (!user) return redirect(res, '/login');
+  if (!customEnabled()) return send(res, 404, layout('۴۰۴', '<p>صفحه یافت نشد.</p>', user));
+  const back = (msg) => '/custom?err=' + encodeURIComponent(msg);
+
+  const body = await readBody(req, 12 * 1024 * 1024);
+  const ct = req.headers['content-type'] || '';
+  const m = /boundary=(?:"([^"]+)"|([^;]+))/.exec(ct);
+  if (!m) return redirect(res, back('فرم نامعتبر است'));
+  const boundary = '--' + (m[1] || m[2]);
+
+  let receiptPath = null, note = '', clientName = '';
+  let volumeInput = '', daysInput = '';
+  const parts = body.toString('binary').split(boundary).slice(1, -1);
+  for (const part of parts) {
+    const headerEnd = part.indexOf('\r\n\r\n');
+    if (headerEnd < 0) continue;
+    const headers = part.slice(0, headerEnd).toString('binary');
+    const content = part.slice(headerEnd + 4);
+    const nameMatch = /name="([^"]+)"/.exec(headers);
+    if (!nameMatch) continue;
+    const fieldName = nameMatch[1];
+    if (fieldName === 'note') {
+      note = Buffer.from(content.replace(/\r\n$/, ''), 'binary').toString('utf8');
+    } else if (fieldName === 'client_name') {
+      clientName = Buffer.from(content.replace(/\r\n$/, ''), 'binary').toString('utf8');
+    } else if (fieldName === 'gb') {
+      volumeInput = Buffer.from(content.replace(/\r\n$/, ''), 'binary').toString('utf8');
+    } else if (fieldName === 'days') {
+      daysInput = Buffer.from(content.replace(/\r\n$/, ''), 'binary').toString('utf8');
+    } else if (fieldName === 'receipt') {
+      const fileMatch = /filename="([^"]*)"/.exec(headers);
+      const ctypeMatch = /Content-Type:\s*([^\r\n]+)/i.exec(headers);
+      if (!fileMatch || !fileMatch[1]) continue;
+      const buf = Buffer.from(content.replace(/\r\n$/, ''), 'binary');
+      const allowed = { 'image/jpeg': '.jpg', 'image/png': '.png', 'image/webp': '.webp' };
+      const ext = allowed[(ctypeMatch?.[1] || '').toLowerCase().split(';')[0]];
+      if (!ext) return redirect(res, back('فقط تصویر jpg/png/webp پذیرفته می‌شود'));
+      if (buf.length > 8 * 1024 * 1024) return redirect(res, back('حجم فایل بیش از ۸ مگابایت است'));
+      const fname = `receipt_${Date.now()}_${randomToken(6)}${ext}`;
+      fs.writeFileSync(path.join(UPLOAD_DIR, fname), buf);
+      receiptPath = '/uploads/' + fname;
+    }
+  }
+  if (!receiptPath) return redirect(res, back('تصویر فیش الزامی است'));
+
+  const gb = Math.floor(Number(volumeInput));
+  if (!(gb >= 1) || gb > 1024) return redirect(res, back('حجم نامعتبر است (۱ تا ۱۰۲۴ گیگ)'));
+  let days = 30;
+  if (customDurationEnabled() && daysInput !== '') {
+    days = Math.floor(Number(daysInput));
+    if (!(days >= 1) || days > 3650) return redirect(res, back('مدت نامعتبر است (۱ تا ۳۶۵۰ روز)'));
+  }
+  const price = customQuote(gb, days);
+  if (!(price > 0)) return redirect(res, back('قیمت هر گیگ تنظیم نشده است'));
+
+  // attach to the hidden auto plan (or create once) so orders JOIN plans works
+  let customPlan = db.prepare("SELECT * FROM plans WHERE name = '__custom__' LIMIT 1").get();
+  if (!customPlan) {
+    const info = db.prepare("INSERT INTO plans (name, volume_gb, duration_days, price_toman, device_limit, active) VALUES ('__custom__', 1, 30, 0, 2, 0)").run();
+    customPlan = db.prepare('SELECT * FROM plans WHERE id = ?').get(info.lastInsertRowid);
+  }
+
+  const cleanName = sanitizeClientName(clientName);
+  db.prepare(`INSERT INTO orders (user_id, plan_id, status, receipt_path, receipt_note, client_name, volume_gb, duration_days, price_toman)
+              VALUES (?, ?, 'awaiting_review', ?, ?, ?, ?, ?, ?)`)
+    .run(user.id, customPlan.id, receiptPath, note.trim() || null, cleanName || null, gb, days, price);
+  redirect(res, '/orders?ok=' + encodeURIComponent(`سفارش ${gb} گیگ ثبت شد (فاکتور ${fmtToman(price)} تومان). پس از تأیید مدیر، کانفیگ تحویل می‌شود.`));
+});
+
 route('GET', '/orders', async (req, res, { user, query }) => {
   if (!user) return redirect(res, '/login');
   const orders = db.prepare(`
-    SELECT o.*, p.name AS plan_name, p.volume_gb, p.duration_days, d.sub_url, d.config_json, d.qr_data_url, d.email AS d_email
+    SELECT o.*, p.name AS plan_name,
+           COALESCE(o.volume_gb, p.volume_gb) AS volume_gb,
+           COALESCE(o.duration_days, p.duration_days) AS duration_days,
+           d.sub_url, d.config_json, d.qr_data_url, d.email AS d_email
     FROM orders o
     JOIN plans p ON p.id = o.plan_id
     LEFT JOIN deliveries d ON d.order_id = o.id
@@ -630,10 +810,11 @@ route('GET', '/orders', async (req, res, { user, query }) => {
   ${orders.map((o) => `
   <div class="card">
     <div class="row" style="justify-content:space-between">
-      <div><b>سفارش #${o.id}</b> — ${esc(o.plan_name)} <span class="mut">(${o.volume_gb == null ? 'نامحدود' : o.volume_gb + 'GB'} / ${o.duration_days == null ? 'نامحدود' : o.duration_days + 'روز'})</span></div>
+      <div><b>سفارش #${o.id}</b> — ${o.plan_name === '__custom__' ? 'کانفیگ دلخواه (' + o.volume_gb + ' گیگ)' : esc(o.plan_name)} <span class="mut">(${o.volume_gb == null ? 'نامحدود' : o.volume_gb + 'GB'} / ${o.duration_days == null ? 'نامحدود' : o.duration_days + 'روز'})</span></div>
       <span class="badge b-${o.status}">${statusFa[o.status] || o.status}</span>
     </div>
     <div class="mut">ثبت: ${fmtDate(o.created_at)} ${o.reviewed_at ? '| بررسی: ' + fmtDate(o.reviewed_at) : ''}</div>
+    ${o.price_toman != null ? `<div class="mut">فاکتور: <b>${fmtToman(o.price_toman)} تومان</b></div>` : ''}
     ${o.status === 'rejected' && o.admin_note ? `<div class="msg err">دلیل رد: ${esc(o.admin_note)}</div>` : ''}
     ${o.sub_url ? `
       <h2 style="margin-top:14px">تحویل سفارش</h2>
@@ -663,6 +844,7 @@ function panelShell(user, title, activeKey, inner) {
     { k: 'dashboard', href: '/dashboard', ico: '📊', label: 'داشبورد' },
     { k: 'orders', href: '/orders', ico: '📦', label: 'سفارش‌ها و کانفیگ‌ها' },
     { k: 'buy', href: '/plans', ico: '🛒', label: 'خرید بسته جدید' },
+    ...(customEnabled() ? [{ k: 'custom', href: '/custom', ico: '🧮', label: 'خرید به مقدار دلخواه' }] : []),
     { k: 'account', href: '/account', ico: '👤', label: 'پروفایل' },
   ];
   if (user.role === 'admin') nav.push({ k: 'admin', href: '/admin', ico: '⚙️', label: 'پنل مدیریت' });
@@ -689,7 +871,9 @@ function panelShell(user, title, activeKey, inner) {
 function userUsageSnapshot(userId) {
   const rows = db.prepare(`
     SELECT d.panel_id, d.email, d.sub_url, d.order_id, d.sub_id,
-           p.name AS plan_name, p.volume_gb, p.duration_days,
+           p.name AS plan_name,
+           COALESCE(o.volume_gb, p.volume_gb) AS volume_gb,
+           COALESCE(o.duration_days, p.duration_days) AS duration_days,
            pan.name AS panel_name
     FROM deliveries d
     JOIN orders o ON o.id = d.order_id
@@ -1042,7 +1226,10 @@ route('GET', '/admin/orders', async (req, res, ctx) => {
   const { user, query } = ctx;
   const status = query.status || '';
   const orders = db.prepare(`
-    SELECT o.*, p.name AS plan_name, u.username, p.volume_gb, p.duration_days, p.price_toman, d.sub_url
+    SELECT o.*, p.name AS plan_name, u.username,
+           COALESCE(o.volume_gb, p.volume_gb) AS volume_gb,
+           COALESCE(o.duration_days, p.duration_days) AS duration_days,
+           COALESCE(o.price_toman, p.price_toman) AS price_toman, d.sub_url
     FROM orders o
     JOIN plans p ON p.id = o.plan_id
     JOIN users u ON u.id = o.user_id
@@ -1060,11 +1247,12 @@ route('GET', '/admin/orders', async (req, res, ctx) => {
   ${orders.map((o) => `
   <div class="card">
     <div class="row" style="justify-content:space-between">
-      <div><b>#${o.id}</b> — ${esc(o.username)} — ${esc(o.plan_name)} — <b>${fmtToman(o.price_toman)} تومان</b></div>
+      <div><b>#${o.id}</b> — ${esc(o.username)} — ${o.plan_name === '__custom__' ? 'کانفیگ دلخواه (' + o.volume_gb + ' گیگ)' : esc(o.plan_name)} — <b>${fmtToman(o.price_toman)} تومان</b></div>
       <span class="badge b-${o.status}">${statusFa[o.status] || o.status}</span>
     </div>
     <div class="mut">ثبت: ${fmtDate(o.created_at)}</div>
     ${o.client_name ? `<div class="mut">نام کاربری دلخواه کانفیگ: <b dir="ltr">${esc(o.client_name)}</b></div>` : ''}
+    ${o.plan_name === '__custom__' ? `<div class="msg ok" style="margin:8px 0 0">🧮 سفارش مقدار دلخواه: <b>${o.volume_gb} گیگ</b>${o.duration_days != 30 ? ' — ' + o.duration_days + ' روزه' : ' یک‌ماهه'} — فاکتور ${fmtToman(o.price_toman)} تومان (قیمت هر گیگ: ${fmtToman(customPricePerGB())})</div>` : ''}
     ${o.admin_note ? `<div class="msg ${o.status === 'rejected' ? 'err' : 'err'}" style="margin:8px 0 0">${esc(o.admin_note)}</div>` : ''}
     ${o.receipt_path ? `<p><img src="${esc(o.receipt_path)}" alt="فیش" style="max-width:340px;max-height:340px;border-radius:8px;border:1px solid var(--line)"></p>
       ${o.receipt_note ? `<div class="mut">توضیح مشتری: ${esc(o.receipt_note)}</div>` : ''}` : '<p class="mut">فیشی بارگذاری نشده</p>'}
@@ -1116,8 +1304,12 @@ async function provisionOrder(order, panelId, inboundIdsRaw) {
   if (!email) email = `u${user.id}o${order.id}_${randomToken(4)}`;
   const baseEmail = email;
   const uuid = crypto.randomUUID();
-  const totalGB = plan.volume_gb == null ? 0 : Math.round(plan.volume_gb * 1024 * 1024 * 1024);
-  const expiryTime = plan.duration_days == null ? 0 : Date.now() + plan.duration_days * 24 * 3600 * 1000;
+  // custom orders (فروش به مقدار دلخواه) carry their own volume/duration on
+  // the order row; plan orders fall back to the plan values.
+  const orderGB = order.volume_gb != null ? order.volume_gb : plan.volume_gb;
+  const orderDays = order.duration_days != null ? order.duration_days : plan.duration_days;
+  const totalGB = orderGB == null ? 0 : Math.round(orderGB * 1024 * 1024 * 1024);
+  const expiryTime = orderDays == null ? 0 : Date.now() + orderDays * 24 * 3600 * 1000;
 
   // The subscription-link path is a RANDOM token, never the customer's
   // account name/email: the customer only chooses the account (email).
@@ -1360,6 +1552,22 @@ route('GET', '/admin/settings', async (req, res, ctx) => {
       <textarea name="shop_notice">${esc(getSetting('shop_notice', ''))}</textarea>
       <button>ذخیره</button>
     </form>
+  </div>
+  <div class="card">
+    <h2>🧮 فروش به مقدار دلخواه (قیمت هر گیگ)</h2>
+    <p class="mut">به‌جای (یا در کنار) بسته‌های ثابت، به مشتری اجازه دهید هر مقدار ترافیک دلخواه را سفارش دهد. قیمت هر گیگ ترافیک ماهانه را اینجا تعیین کنید؛ مثلاً <b>۵۰۰۰</b> یعنی سفارش ۲۰ گیگ = فاکتور ۱۰۰٫۰۰۰ تومان. <b>۰ یا خالی = این روش فروش خاموش است</b> و صفحه «خرید به مقدار دلخواه» مخفی می‌شود.</p>
+    <form method="post" action="/admin/settings/custom">
+      <div class="row">
+        <div style="flex:1;min-width:220px"><label>قیمت هر گیگ ترافیک ماهانه (تومان — ۰ = خاموش)</label>
+        <input name="custom_price_per_gb" type="number" min="0" step="1000" value="${esc(getSetting('custom_price_per_gb', '0'))}" dir="ltr"></div>
+        <div style="flex:1;min-width:220px"><label>انتخاب مدت توسط مشتری</label>
+        <select name="custom_duration_enabled">
+          <option value="0" ${getSetting('custom_duration_enabled', '0') !== '1' ? 'selected' : ''}>خیر — همیشه یک‌ماهه (۳۰ روز)</option>
+          <option value="1" ${getSetting('custom_duration_enabled', '0') === '1' ? 'selected' : ''}>بله — مشتری مدت (روز) را هم وارد می‌کند (قیمت = حجم × هر گیگ × روز/۳۰)</option>
+        </select></div>
+      </div>
+      <button>ذخیره تنظیمات مقدار دلخواه</button>
+    </form>
   </div>`;
   send(res, 200, layout('تنظیمات', body, ctx.user));
 });
@@ -1373,12 +1581,23 @@ route('POST', '/admin/settings', async (req, res, ctx) => {
   redirect(res, '/admin/settings?ok=1');
 });
 
+// admin: custom-quantity selling (price per GB + optional custom duration)
+route('POST', '/admin/settings/custom', async (req, res, ctx) => {
+  if (!requireAdmin(ctx)) return;
+  const b = new URLSearchParams((await readBody(req)).toString());
+  const perGB = parseInt(b.get('custom_price_per_gb') || '0', 10);
+  setSetting('custom_price_per_gb', String(Math.max(0, perGB || 0)));
+  setSetting('custom_duration_enabled', b.get('custom_duration_enabled') === '1' ? '1' : '0');
+  redirect(res, '/admin/settings?ok=' + encodeURIComponent(perGB > 0 ? 'فروش به مقدار دلخواه فعال شد (هر گیگ: ' + fmtToman(perGB) + ' تومان)' : 'فروش به مقدار دلخواه خاموش شد'));
+});
+
 // ---- admin: new-order polling (the admin page calls this every 5 s)
 route('GET', '/api/admin/orders/new', async (req, res, ctx) => {
   if (!requireAdmin(ctx)) return;
   const after = parseInt(ctx.query.after || '0', 10) || 0;
   const rows = db.prepare(`
-    SELECT o.id, o.created_at, o.status, o.client_name, u.username, p.name AS plan_name, p.price_toman
+    SELECT o.id, o.created_at, o.status, o.client_name, o.volume_gb,
+           u.username, p.name AS plan_name
     FROM orders o
     JOIN users u ON u.id = o.user_id
     JOIN plans p ON p.id = o.plan_id

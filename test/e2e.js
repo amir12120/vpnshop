@@ -188,6 +188,66 @@ async function multipart(path, cookie, fields, file) {
   const mLabels = (mJson.chart.points || []).map((p) => p.label);
   check('monthly labels are unique (no duplicated month)', new Set(mLabels).size === mLabels.length);
 
+  console.log('— custom-quantity selling (خرید به مقدار دلخواه)');
+  // disabled by default: page hidden, nav hidden
+  check('/custom 404 while disabled', (await api('/custom', { cookie: custCookie })).res.status === 404);
+  const custHome0 = await (await api('/plans', { cookie: custCookie })).res.text();
+  check('custom promo hidden while disabled', !custHome0.includes('خرید کانفیگ به مقدار دلخواه'));
+
+  // admin: enable with 5000 per GB
+  r = await api('/admin/settings/custom', {
+    method: 'POST', cookie: adminCookie,
+    form: new URLSearchParams({ custom_price_per_gb: '5000', custom_duration_enabled: '0' }),
+  });
+  check('custom settings saved', r.res.status === 302);
+  const custCustom = await (await api('/custom', { cookie: custCookie })).res.text();
+  check('/custom live (200 + per-GB price shown)', custCustom.includes('۵٬۰۰۰ تومان') && custCustom.includes('خرید کانفیگ به مقدار دلخواه'));
+  check('/custom shows card number', custCustom.includes('6037-9911-1234-5678'));
+  check('custom quote JS present', custCustom.includes('vpnQuote'));
+  const cust2 = await api('/register', { method: 'POST', form: new URLSearchParams({ username: 'cust2', password: 'custpass456' }) });
+  const cust2Cookie = cust2.cookie;
+  check('second customer registered', !!cust2Cookie);
+  const cust2Plans = await (await api('/', { cookie: cust2Cookie })).res.text();
+  check('custom promo card on homepage', cust2Plans.includes('خرید کانفیگ به مقدار دلخواه'));
+  check('custom nav item in panel sidebar', cust2Plans.includes('href="/custom"'));
+
+  // invalid volume rejected
+  r = await multipart('/custom', cust2Cookie, { gb: '0', days: '', client_name: '', note: '' }, { field: 'receipt', buf: png });
+  check('invalid volume rejected', String(r.headers.get('location') || '').includes('/custom?err='));
+
+  // 20 GB → 100,000 toman invoice, custom client name
+  r = await multipart('/custom', cust2Cookie, { gb: '20', days: '', client_name: 'mycustom', note: 'کارت ۷۷۷۷' }, { field: 'receipt', buf: png });
+  check('custom order accepted', r.status === 302);
+  const cust2Orders = await (await api('/orders', { cookie: cust2Cookie })).res.text();
+  check('custom order shown with volume + invoice', cust2Orders.includes('کانفیگ دلخواه (20 گیگ)') && cust2Orders.includes('۱۰۰٬۰۰۰'));
+
+  // admin sees the custom summary and approves → 20 GB / 30d client provisioned
+  const adminOrders2 = await (await api('/admin/orders', { cookie: adminCookie })).res.text();
+  check('admin sees custom-order summary', adminOrders2.includes('سفارش مقدار دلخواه') && adminOrders2.includes('20 گیگ'));
+  const customOrderId = (adminOrders2.match(/\/admin\/orders\/(\d+)\/approve/) || [])[1];
+  check('custom approve form rendered', !!customOrderId);
+  r = await api(`/admin/orders/${customOrderId}/approve`, {
+    method: 'POST', cookie: adminCookie,
+    form: new URLSearchParams({ panel_id: panelId, inbound_ids: '1,2' }),
+  });
+  check('custom approve POST ok', r.res.status === 302);
+  const cust2Delivered = await (await api('/orders', { cookie: cust2Cookie })).res.text();
+  check('custom order delivered with links', cust2Delivered.includes('تحویل شده') && cust2Delivered.includes('vless://'));
+  check('custom account named after customer input', cust2Delivered.includes('mycustom'));
+
+  // meter + dashboard must see the 20 GB quota (not the hidden plan's 1 GB)
+  const cust2Dash = await (await api('/api/user/dashboard?mode=day&live=1', { cookie: cust2Cookie })).res.text();
+  const d2 = JSON.parse(cust2Dash);
+  check('dashboard quota = custom 20 GiB (not plan 1 GiB)', d2.ok && d2.rows.length === 1 && d2.rows[0].quotaB === 20 * 1073741824);
+
+  // disable again → page + promo disappear for everyone
+  r = await api('/admin/settings/custom', {
+    method: 'POST', cookie: adminCookie,
+    form: new URLSearchParams({ custom_price_per_gb: '0', custom_duration_enabled: '0' }),
+  });
+  check('custom settings disabled', r.res.status === 302);
+  check('/custom 404 again after disable', (await api('/custom', { cookie: cust2Cookie })).res.status === 404);
+
   console.log('— security: private receipt');
   const receiptPath = (custOrders2.match(/\/uploads\/receipt_[a-z0-9_]+\.png/) || adminOrders.match(/\/uploads\/receipt_[a-z0-9_]+\.png/) || [])[0];
   if (receiptPath) {
