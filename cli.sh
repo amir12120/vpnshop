@@ -14,7 +14,7 @@
 # ============================================================
 set -euo pipefail
 
-VERSION="1.5.0"
+VERSION="1.6.0"
 REPO_OWNER="amir12120"
 REPO_NAME="vpnshop"
 BRANCH="${VPN_SHOP_BRANCH:-main}"

@@ -305,8 +305,11 @@ EOF
     # serve TLS directly on the public port the user chose — https://Domain:Port
     if ! vpnshop ssl issue --port "${PORT}" "${DOMAIN}"; then
       echo "!! SSL issuance failed — serving plain HTTP on port ${PORT} instead."
-      echo "   Check DNS (does ${DOMAIN} point to this server?), then retry:"
-      echo "     vpnshop ssl letsencrypt --port ${PORT} ${DOMAIN}"
+      echo "   Check these, then retry:"
+      echo "     - DNS: does ${DOMAIN} point to this server's IP? (A record, propagated)"
+      echo "     - Firewall: TCP port 80 must be open (ufw allow 80/tcp) — the installer tries to open it"
+      echo "     - Nothing else may hold port 80 during the challenge (nginx is stopped automatically)"
+      echo "   Retry with:  vpnshop ssl letsencrypt --port ${PORT} ${DOMAIN}"
       write_http_vhost
     fi
   fi
@@ -323,6 +326,9 @@ if command -v ufw >/dev/null 2>&1; then
   if [ -n "${DOMAIN}" ]; then
     ufw allow "${PORT}/tcp" >/dev/null 2>&1 || true      # public port (nginx; TLS if SSL)
     # internal node port stays firewalled OFF — reachable only via nginx/localhost
+    if [ "${SSL_MODE}" = "1" ]; then
+      ufw allow 80/tcp >/dev/null 2>&1 || true           # Let's Encrypt HTTP-01 challenge
+    fi
   else
     ufw allow "${PORT}/tcp" >/dev/null 2>&1 || true
   fi

@@ -9,7 +9,7 @@
 # ============================================================
 set -euo pipefail
 
-VERSION="1.5.0"
+VERSION="1.6.0"
 APP_DIR="${VPN_SHOP_APP_DIR:-/opt/vpnshop}"
 SERVICE="vpnshop"
 NGINX_SITE="/etc/nginx/sites-available/vpnshop"
@@ -223,8 +223,32 @@ server {
 EOF
 }
 
+dns_precheck() {  # $1 = domain — fail fast if the domain has no DNS record at all
+  local domain="$1"
+  if ! getent hosts "$domain" >/dev/null 2>&1; then
+    echo "!! DNS: '$domain' does not resolve from this server."
+    echo "   Add an A record for $domain pointing to this server and wait for propagation, then retry."
+    return 1
+  fi
+  local myip="" resolved
+  myip=$(curl -fsS --max-time 8 -4 https://api.ipify.org 2>/dev/null || curl -fsS --max-time 8 -4 https://ifconfig.me 2>/dev/null || true)
+  resolved=$(getent ahostsv4 "$domain" | awk 'NR==1{print $1}')
+  if [ -n "$myip" ] && [ -n "$resolved" ] && [ "$resolved" != "$myip" ]; then
+    echo "!! DNS warning: $domain resolves to $resolved, but this server's public IP is $myip."
+    echo "   Let's Encrypt will likely fail — fix DNS (or disable the CDN proxy) and retry."
+  fi
+  return 0
+}
+
 issue_cert() {  # $1 = domain — standalone issuance, nginx stopped around the challenge
-  local domain="$1" stopped_nginx=0 holder
+  local domain="$1" stopped_nginx=0 holder attempt
+  dns_precheck "$domain" || return 1
+
+  # the HTTP-01 challenge needs inbound TCP 80; open it in ufw if active
+  if command -v ufw >/dev/null 2>&1 && ufw status | grep -q 'Status: active'; then
+    ufw allow 80/tcp >/dev/null 2>&1 || true
+  fi
+
   if holder=$(port80_holder) && [ -n "$holder" ]; then
     if [ "$holder" = "nginx" ]; then
       echo "  port 80 is held by nginx — stopping it temporarily for the challenge..."
@@ -239,13 +263,19 @@ issue_cert() {  # $1 = domain — standalone issuance, nginx stopped around the 
     echo "  port 80 is free."
   fi
 
-  local cert_ok=0
-  if certbot certonly --standalone -d "$domain" --non-interactive --agree-tos \
-       --keep-until-expiring -m "admin@${domain#*.}"; then
-    cert_ok=1
-  fi
-
   # always bring nginx back up, cert or no cert
+  trap 'if [ "$stopped_nginx" = "1" ]; then systemctl start nginx >/dev/null 2>&1 || true; fi' RETURN
+
+  local cert_ok=0
+  for attempt in 1 2; do
+    if certbot certonly --standalone -d "$domain" --non-interactive --agree-tos \
+         --keep-until-expiring -m "admin@${domain#*.}"; then
+      cert_ok=1
+      break
+    fi
+    [ "$attempt" = "1" ] && { echo "  certbot attempt 1 failed — retrying in 8s..."; sleep 8; }
+  done
+
   if [ "$stopped_nginx" = "1" ]; then
     systemctl start nginx && ok "nginx restarted"
   fi
@@ -273,7 +303,12 @@ ssl_letsencrypt() {  # [--port N] [domain] — shop address becomes https://Doma
   done
   domain="${domain:-$(get_domain)}"
   [ -n "$domain" ] || { err "usage: vpnshop ssl letsencrypt [--port N] <domain>"; exit 1; }
-  command -v certbot >/dev/null 2>&1 || apt-get install -y certbot
+  if ! command -v certbot >/dev/null 2>&1; then
+    echo ">> installing certbot (apt)..."
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update -y
+    apt-get install -y --no-install-recommends certbot
+  fi
   if [ -z "$pport" ]; then
     pport=$(get_public_port)
     if [ -z "$pport" ]; then
@@ -291,6 +326,9 @@ ssl_letsencrypt() {  # [--port N] [domain] — shop address becomes https://Doma
     systemctl reload nginx 2>/dev/null || systemctl restart nginx
   } \
     && ok "HTTPS enabled: https://${domain}:${pport}"
+  if command -v ufw >/dev/null 2>&1 && ufw status | grep -q 'Status: active'; then
+    ufw allow "${pport}/tcp" >/dev/null 2>&1 || true
+  fi
   install_renewal_hooks
 }
 
