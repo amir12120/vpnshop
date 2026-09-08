@@ -62,8 +62,17 @@ async function multipart(path, cookie, fields, file) {
 
   console.log('— health');
   const home = await fetch(SHOP + '/');
+  const homeText = await home.text();
   check('GET / returns 200', home.status === 200);
-  check('homepage lists no plans yet', !(await home.text()).includes('خرید (کارت به کارت)'));
+  check('homepage lists no plans yet', !homeText.includes('خرید (کارت به کارت)'));
+  // bundled Persian fonts must be served (regression: /assets/fonts route)
+  const font = await fetch(SHOP + '/assets/fonts/Vazirmatn-Regular.woff2');
+  check('font file serves 200', font.status === 200);
+  check('font content-type is font/woff2', (font.headers.get('content-type') || '').startsWith('font/woff2'));
+  check('dark theme default (data-theme=dark)', homeText.includes('<html lang="fa" dir="rtl" data-theme="dark">'));
+  check('theme toggle rendered', homeText.includes('id="themeBtn"') && homeText.includes('onclick="vpnTheme()"'));
+  check('language toggle rendered', homeText.includes('id="langBtn"') && homeText.includes('onclick="vpnLang()"'));
+  check('Persian font face declared', (homeText.match(/@font-face/g) || []).length === 4);
 
   console.log('— admin bootstrap (created by test setup)');
   // admin is created via seed-admin.js before running this test

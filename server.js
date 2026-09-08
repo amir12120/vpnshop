@@ -1726,6 +1726,16 @@ route('GET', '/uploads/:name', async (req, res, ctx) => {
   send(res, 200, fs.readFileSync(file), { 'Content-Type': MIME[ext], 'Cache-Control': 'private, max-age=3600' });
 });
 
+// fonts live in public/fonts — the generic /assets/:name route only matches
+// one path segment, so fonts get their own route (basename + traversal guard)
+route('GET', '/assets/fonts/:file', async (req, res, ctx) => {
+  const name = path.basename(ctx.params.file);
+  if (name !== ctx.params.file) return send(res, 404, 'not found');
+  const file = path.join(PUBLIC_DIR, 'fonts', name);
+  if (!fs.existsSync(file) || !MIME[path.extname(name).toLowerCase()]) return send(res, 404, 'not found');
+  send(res, 200, fs.readFileSync(file), { 'Content-Type': MIME[path.extname(name).toLowerCase()] });
+});
+
 route('GET', '/assets/:name', async (req, res, ctx) => {
   const name = path.basename(ctx.params.name);
   const file = path.join(PUBLIC_DIR, name);
