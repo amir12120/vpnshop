@@ -7,7 +7,7 @@
     "lib": "lib"
   },
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "node --check server.js && node --check seed-admin.js && for f in lib/*.js scripts/*.js; do node --check \"$f\"; done"
   },
   "keywords": [],
   "author": "",
