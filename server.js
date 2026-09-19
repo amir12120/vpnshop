@@ -1,5 +1,6 @@
 'use strict';
 const http = require('http');
+const { AsyncLocalStorage } = require('async_hooks');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
@@ -25,10 +26,12 @@ const MIME = {
 };
 
 // ---------------------------------------------------------------- helpers
-// Per-request UI language (fa|en) and theme (dark|light) — read from cookies in
-// the dispatcher; handlers are synchronous per request so module globals are safe.
-let CUR_LANG = 'fa';
-let CUR_THEME = 'dark';
+// Per-request UI language and theme. Handlers can await network/database work,
+// so module globals would let concurrent users overwrite one another's view.
+const requestContext = new AsyncLocalStorage();
+function viewContext() {
+  return requestContext.getStore() || { lang: 'fa', theme: 'dark' };
+}
 
 function send(res, status, body, headers = {}) {
   res.writeHead(status, headers);
@@ -102,7 +105,7 @@ function route(method, pattern, handler) {
 
 // ---------------------------------------------------------------- views (tiny template helpers)
 const layout = (title, body, user, wide) => {
-const L = CUR_LANG, T = CUR_THEME;
+const { lang: L, theme: T } = viewContext();
 let html = `<!doctype html>
 <html lang="${L}" dir="${L === 'en' ? 'ltr' : 'rtl'}" data-theme="${T}">
 <head>
@@ -794,7 +797,7 @@ route('GET', '/custom', async (req, res, { user, query }) => {
   });
   var VPN_PER_GB = ${perGB};
   var VPN_DUR_ON = ${durOn ? 'true' : 'false'};
-  var VPN_EN = ${CUR_LANG === 'en' ? 'true' : 'false'};
+  var VPN_EN = ${viewContext().lang === 'en' ? 'true' : 'false'};
   function fa(n){ return Number(n||0).toLocaleString(VPN_EN ? 'en-US' : 'fa-IR'); }
   function vpnQuote(){
     var gb = Math.max(0, Math.floor(Number(document.getElementById('gb').value) || 0));
@@ -935,7 +938,7 @@ const MODE_WINDOW_FA = { hour: '۲۴ ساعت گذشته', day: '۳۰ روز گ�
 const faN = (x, d = 2) => Number(x || 0).toLocaleString('fa-IR', { maximumFractionDigits: d });
 const GIB = 1073741824; // panels account volume in GiB — keep display in sync
 const gbTxt = (bytes) => (bytes > 0 ? faN(bytes / GIB) + ' گیگ' : '۰ گیگ');
-const fmtDT = (ts) => ts ? new Intl.DateTimeFormat(CUR_LANG === 'en' ? 'en-US' : 'fa-IR', { day: 'numeric', month: 'short', year: 'numeric' }).format(new Date(ts)) : '—';
+const fmtDT = (ts) => ts ? new Intl.DateTimeFormat(viewContext().lang === 'en' ? 'en-US' : 'fa-IR', { day: 'numeric', month: 'short', year: 'numeric' }).format(new Date(ts)) : '—';
 
 // Sidebar shell wrapping every customer-panel page.
 function panelShell(user, title, activeKey, inner) {
@@ -1022,7 +1025,7 @@ function userUsageSnapshot(userId) {
 // the actual Jalaali months the (calendar-aligned) buckets represent.
 function usageChartPayload(userId, mode) {
   const s = meter.seriesForUser(userId, mode);
-  const loc = CUR_LANG === 'en' ? 'en-US' : 'fa-IR';
+  const loc = viewContext().lang === 'en' ? 'en-US' : 'fa-IR';
   const fmtH = new Intl.DateTimeFormat(loc, { hour: '2-digit', minute: '2-digit', hour12: false });
   const fmtD = new Intl.DateTimeFormat(loc, { day: 'numeric', month: 'short' });
   const fmtM = new Intl.DateTimeFormat(loc, { month: 'long' });
@@ -1124,7 +1127,7 @@ function dashboardInner(user, snap, chartDay) {
 // live-refreshes usage from the panels (meter records a fresh sample each time).
 const USER_JS = `<script>
 var DASH = { mode: 'day' };
-var VPN_EN = ${CUR_LANG === 'en' ? 'true' : 'false'};
+var VPN_EN = ${viewContext().lang === 'en' ? 'true' : 'false'};
 function faNum(x, d){ return Number(x||0).toLocaleString(VPN_EN ? 'en-US' : 'fa-IR',{ maximumFractionDigits: d==null?2:d }); }
 function gbS(bytes){ var g = Number(bytes||0)/1073741824; return faNum(g, g>=10?1:2) + (VPN_EN ? ' GB' : ' گیگ'); }
 function escS(s){ return String(s==null?'':s).replace(/[&<>"']/g, function(c){
@@ -1436,10 +1439,10 @@ async function provisionOrder(order, panelId, inboundIdsRaw) {
 
 route('POST', '/admin/orders/:id/approve', async (req, res, ctx) => {
   if (!requireAdmin(ctx)) return;
-  const order = db.prepare('SELECT * FROM orders WHERE id = ?').get(ctx.params.id);
-  if (!order || order.status !== 'awaiting_review') return redirect(res, '/admin/orders');
   const b = new URLSearchParams((await readBody(req)).toString());
-  db.prepare("UPDATE orders SET status='provisioning' WHERE id=?").run(order.id);
+  const claim = db.prepare("UPDATE orders SET status='provisioning' WHERE id=? AND status='awaiting_review'").run(ctx.params.id);
+  if (Number(claim.changes) !== 1) return redirect(res, '/admin/orders');
+  const order = db.prepare('SELECT * FROM orders WHERE id = ?').get(ctx.params.id);
   try {
     await provisionOrder(order, b.get('panel_id'), b.get('inbound_ids'));
   } catch (e) {
@@ -1451,12 +1454,11 @@ route('POST', '/admin/orders/:id/approve', async (req, res, ctx) => {
 
 route('POST', '/admin/orders/:id/reject', async (req, res, ctx) => {
   if (!requireAdmin(ctx)) return;
-  const order = db.prepare('SELECT * FROM orders WHERE id = ?').get(ctx.params.id);
-  if (!order || order.status !== 'awaiting_review') return redirect(res, '/admin/orders');
   const b = new URLSearchParams((await readBody(req)).toString());
-  db.prepare("UPDATE orders SET status='rejected', reviewed_at=datetime('now'), admin_note=? WHERE id=?")
-    .run(b.get('admin_note') || null, order.id);
-  redirect(res, '/admin/orders?ok=' + encodeURIComponent(`سفارش #${order.id} رد شد`));
+  const result = db.prepare("UPDATE orders SET status='rejected', reviewed_at=datetime('now'), admin_note=? WHERE id=? AND status='awaiting_review'")
+    .run(b.get('admin_note') || null, ctx.params.id);
+  if (Number(result.changes) !== 1) return redirect(res, '/admin/orders');
+  redirect(res, '/admin/orders?ok=' + encodeURIComponent(`سفارش #${ctx.params.id} رد شد`));
 });
 
 // ---- admin: plans
@@ -1745,12 +1747,13 @@ route('GET', '/assets/:name', async (req, res, ctx) => {
 
 // ---------------------------------------------------------------- server
 const server = http.createServer(async (req, res) => {
-  try {
-    const u = new URL(req.url, 'http://localhost');
-    const qs = Object.fromEntries(u.searchParams);
-    const cookies = parseCookies(req);
-    CUR_LANG = cookies.lang === 'en' ? 'en' : 'fa';
-    CUR_THEME = cookies.theme === 'light' ? 'light' : 'dark';
+  const cookies = parseCookies(req);
+  const lang = cookies.lang === 'en' ? 'en' : 'fa';
+  const theme = cookies.theme === 'light' ? 'light' : 'dark';
+  return requestContext.run({ lang, theme }, async () => {
+    try {
+      const u = new URL(req.url, 'http://localhost');
+      const qs = Object.fromEntries(u.searchParams);
     const ctx = { user: getUser(req), params: {}, query: qs, req, res };
 
     for (const r of routes) {
@@ -1762,10 +1765,11 @@ const server = http.createServer(async (req, res) => {
       return;
     }
     send(res, 404, layout('۴۰۴', '<p>صفحه یافت نشد.</p>', ctx.user));
-  } catch (e) {
-    console.error('[server]', e);
-    try { sendJSON(res, 500, { error: e.message }); } catch { /* headers sent */ }
-  }
+    } catch (e) {
+      console.error('[server]', e);
+      try { sendJSON(res, 500, { error: e.message }); } catch { /* headers sent */ }
+    }
+  });
 });
 
 server.on('error', (e) => {
