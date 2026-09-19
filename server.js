@@ -70,6 +70,10 @@ function esc(s) {
 }
 function fmtDate(d) { return d || '—'; }
 function fmtToman(n) { return Number(n).toLocaleString('fa-IR'); }
+function discardReceipt(receiptPath) {
+  if (!receiptPath || !receiptPath.startsWith('/uploads/')) return;
+  try { fs.unlinkSync(path.join(UPLOAD_DIR, path.basename(receiptPath))); } catch { /* already absent */ }
+}
 
 // Customer's chosen config username → client email on the Sanayi panel.
 // 3x-ui forbids spaces, '/', '\' and control chars in emails. Empty input
@@ -707,7 +711,10 @@ route('POST', '/buy/:planId', async (req, res, { user, params }) => {
   // duplicate protection: a second click must not create a second order while
   // an identical request is already awaiting the admin's review
   const dup = db.prepare("SELECT id FROM orders WHERE user_id = ? AND plan_id = ? AND status = 'awaiting_review'").get(user.id, plan.id);
-  if (dup) return redirect(res, '/orders?err=' + encodeURIComponent('شما قبلاً درخواستی برای این بسته ثبت کرده‌اید و در انتظار تأیید مدیر است.'));
+  if (dup) {
+    discardReceipt(receiptPath);
+    return redirect(res, '/orders?err=' + encodeURIComponent('شما قبلاً درخواستی برای این بسته ثبت کرده‌اید و در انتظار تأیید مدیر است.'));
+  }
 
   const cleanName = sanitizeClientName(clientName);
   db.prepare(`INSERT INTO orders (user_id, plan_id, status, receipt_path, receipt_note, client_name)
@@ -867,14 +874,23 @@ route('POST', '/custom', async (req, res, { user }) => {
   if (!receiptPath) return redirect(res, back('تصویر فیش الزامی است'));
 
   const gb = Math.floor(Number(volumeInput));
-  if (!(gb >= 1) || gb > 1024) return redirect(res, back('حجم نامعتبر است (۱ تا ۱۰۲۴ گیگ)'));
+  if (!(gb >= 1) || gb > 1024) {
+    discardReceipt(receiptPath);
+    return redirect(res, back('حجم نامعتبر است (۱ تا ۱۰۲۴ گیگ)'));
+  }
   let days = 30;
   if (customDurationEnabled() && daysInput !== '') {
     days = Math.floor(Number(daysInput));
-    if (!(days >= 1) || days > 3650) return redirect(res, back('مدت نامعتبر است (۱ تا ۳۶۵۰ روز)'));
+    if (!(days >= 1) || days > 3650) {
+      discardReceipt(receiptPath);
+      return redirect(res, back('مدت نامعتبر است (۱ تا ۳۶۵۰ روز)'));
+    }
   }
   const price = customQuote(gb, days);
-  if (!(price > 0)) return redirect(res, back('قیمت هر گیگ تنظیم نشده است'));
+  if (!(price > 0)) {
+    discardReceipt(receiptPath);
+    return redirect(res, back('قیمت هر گیگ تنظیم نشده است'));
+  }
 
   // attach to the hidden auto plan (or create once) so orders JOIN plans works
   let customPlan = db.prepare("SELECT * FROM plans WHERE name = '__custom__' LIMIT 1").get();
@@ -884,7 +900,10 @@ route('POST', '/custom', async (req, res, { user }) => {
   }
 
   const dup = db.prepare("SELECT id FROM orders WHERE user_id = ? AND plan_id = ? AND status = 'awaiting_review'").get(user.id, customPlan.id);
-  if (dup) return redirect(res, '/orders?err=' + encodeURIComponent('شما قبلاً درخواست مقدار دلخواه ثبت کرده‌اید و در انتظار تأیید مدیر است.'));
+  if (dup) {
+    discardReceipt(receiptPath);
+    return redirect(res, '/orders?err=' + encodeURIComponent('شما قبلاً درخواست مقدار دلخواه ثبت کرده‌اید و در انتظار تأیید مدیر است.'));
+  }
 
   const cleanName = sanitizeClientName(clientName);
   db.prepare(`INSERT INTO orders (user_id, plan_id, status, receipt_path, receipt_note, client_name, volume_gb, duration_days, price_toman)
@@ -1467,6 +1486,7 @@ route('GET', '/admin/plans', async (req, res, ctx) => {
   const plans = db.prepare('SELECT * FROM plans ORDER BY sort, id').all();
   const body = `
   <h1>پلن‌ها</h1>
+  ${ctx.query.err ? `<div class="msg err">⚠ ${esc(ctx.query.err)}</div>` : ''}
   ${plans.map((p) => `
   <div class="card">
     <form method="post" action="/admin/plans/${p.id}">
@@ -1499,29 +1519,50 @@ route('GET', '/admin/plans', async (req, res, ctx) => {
 });
 
 function planFields(b) {
-  const num = (v) => (v === '' || v == null ? null : Number(v));
-  return {
+  const optional = (v, label) => {
+    if (v === '' || v == null) return null;
+    const n = Number(v);
+    if (!Number.isFinite(n) || n < 0) throw new Error(`${label} نامعتبر است`);
+    return n;
+  };
+  const requiredNonNegative = (v, label) => {
+    const n = Number(v);
+    if (!Number.isFinite(n) || n < 0) throw new Error(`${label} نامعتبر است`);
+    return n;
+  };
+  const f = {
     name: (b.get('name') || '').trim(),
-    volume_gb: num(b.get('volume_gb')),
-    duration_days: num(b.get('duration_days')),
-    price_toman: num(b.get('price_toman')) ?? 0,
-    device_limit: num(b.get('device_limit')) ?? 2,
-    inbound_id: num(b.get('inbound_id')),
+    volume_gb: optional(b.get('volume_gb'), 'حجم'),
+    duration_days: optional(b.get('duration_days'), 'مدت'),
+    price_toman: requiredNonNegative(b.get('price_toman'), 'قیمت'),
+    device_limit: requiredNonNegative(b.get('device_limit') || '2', 'محدودیت دستگاه'),
+    inbound_id: optional(b.get('inbound_id'), 'Inbound'),
     active: b.get('active') === '0' ? 0 : 1,
   };
+  if (!f.name) throw new Error('نام پلن الزامی است');
+  if (f.volume_gb != null && f.volume_gb <= 0) throw new Error('حجم باید بزرگ‌تر از صفر باشد');
+  if (f.duration_days != null && f.duration_days <= 0) throw new Error('مدت باید بزرگ‌تر از صفر باشد');
+  if (!Number.isInteger(f.duration_days ?? 1) || !Number.isInteger(f.device_limit) || (f.inbound_id != null && !Number.isInteger(f.inbound_id))) {
+    throw new Error('مقادیر پلن باید عدد صحیح باشند');
+  }
+  return f;
 }
 route('POST', '/admin/plans/new', async (req, res, ctx) => {
   if (!requireAdmin(ctx)) return;
-  const f = planFields(new URLSearchParams((await readBody(req)).toString()));
-  db.prepare('INSERT INTO plans (name, volume_gb, duration_days, price_toman, device_limit, inbound_id, active) VALUES (?,?,?,?,?,?,?)')
-    .run(f.name, f.volume_gb, f.duration_days, f.price_toman, f.device_limit, f.inbound_id, f.active);
+  try {
+    const f = planFields(new URLSearchParams((await readBody(req)).toString()));
+    db.prepare('INSERT INTO plans (name, volume_gb, duration_days, price_toman, device_limit, inbound_id, active) VALUES (?,?,?,?,?,?,?)')
+      .run(f.name, f.volume_gb, f.duration_days, f.price_toman, f.device_limit, f.inbound_id, f.active);
+  } catch (e) { return redirect(res, '/admin/plans?err=' + encodeURIComponent(e.message)); }
   redirect(res, '/admin/plans');
 });
 route('POST', '/admin/plans/:id', async (req, res, ctx) => {
   if (!requireAdmin(ctx)) return;
-  const f = planFields(new URLSearchParams((await readBody(req)).toString()));
-  db.prepare('UPDATE plans SET name=?, volume_gb=?, duration_days=?, price_toman=?, device_limit=?, inbound_id=?, active=? WHERE id=?')
-    .run(f.name, f.volume_gb, f.duration_days, f.price_toman, f.device_limit, f.inbound_id, f.active, ctx.params.id);
+  try {
+    const f = planFields(new URLSearchParams((await readBody(req)).toString()));
+    db.prepare('UPDATE plans SET name=?, volume_gb=?, duration_days=?, price_toman=?, device_limit=?, inbound_id=?, active=? WHERE id=?')
+      .run(f.name, f.volume_gb, f.duration_days, f.price_toman, f.device_limit, f.inbound_id, f.active, ctx.params.id);
+  } catch (e) { return redirect(res, '/admin/plans?err=' + encodeURIComponent(e.message)); }
   redirect(res, '/admin/plans');
 });
 
